@@ -1,0 +1,8 @@
+{
+  "name": "Genesis Atelier - AI Creative Companion",
+  "description": "A sophisticated AI-powered writing platform featuring a seamless workflow from inspiration to polished manuscripts, including proactive AI suggestions and deep research capabilities.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
