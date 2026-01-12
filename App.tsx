@@ -1,8 +1,9 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Project, ViewState, Chapter, AIMode, AIStyle } from './types';
 import { InspirationWizard } from './components/InspirationWizard';
 import { Editor } from './components/Editor';
+import { saveProjectsToCloud, loadProjectsFromCloud } from './services/storageService';
 
 const MOCK_PROJECTS: Project[] = [
   {
@@ -67,21 +68,86 @@ const App: React.FC = () => {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [sparkInput, setSparkInput] = useState('');
   const [initialSpark, setInitialSpark] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const cloudSaveTimer = useRef<number | null>(null);
 
+  // 初始化加载数据：优先从 Cloud Storage 加载，失败则从 localStorage 加载
   useEffect(() => {
-    const saved = localStorage.getItem('genesis_projects');
-    if (saved && JSON.parse(saved).length > 0) {
-      setProjects(JSON.parse(saved));
-    } else {
-      setProjects(MOCK_PROJECTS);
-    }
+    const loadData = async () => {
+      try {
+        setIsLoading(true);
+        // 先尝试从 Cloud Storage 加载
+        const cloudProjects = await loadProjectsFromCloud();
+        if (cloudProjects && cloudProjects.length > 0) {
+          setProjects(cloudProjects);
+          // 同步到 localStorage 作为备份
+          localStorage.setItem('genesis_projects', JSON.stringify(cloudProjects));
+          return;
+        }
+        
+        // 如果云端没有数据，尝试从 localStorage 加载
+        const saved = localStorage.getItem('genesis_projects');
+        if (saved) {
+          const localProjects = JSON.parse(saved);
+          if (localProjects && localProjects.length > 0) {
+            setProjects(localProjects);
+            // 将本地数据同步到云端
+            await saveProjectsToCloud(localProjects);
+            return;
+          }
+        }
+        
+        // 都没有则使用默认数据
+        setProjects(MOCK_PROJECTS);
+      } catch (error) {
+        console.error('Error loading data:', error);
+        // 出错时从 localStorage 加载
+        const saved = localStorage.getItem('genesis_projects');
+        if (saved) {
+          const localProjects = JSON.parse(saved);
+          if (localProjects && localProjects.length > 0) {
+            setProjects(localProjects);
+          } else {
+            setProjects(MOCK_PROJECTS);
+          }
+        } else {
+          setProjects(MOCK_PROJECTS);
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadData();
   }, []);
 
+  // 保存数据：同时保存到 localStorage 和 Cloud Storage（防抖）
   useEffect(() => {
-    if (projects.length > 0) {
-      localStorage.setItem('genesis_projects', JSON.stringify(projects));
+    if (projects.length === 0 || isLoading) return;
+    
+    // 立即保存到 localStorage
+    localStorage.setItem('genesis_projects', JSON.stringify(projects));
+    
+    // 防抖保存到云端（延迟 2 秒）
+    if (cloudSaveTimer.current) {
+      clearTimeout(cloudSaveTimer.current);
     }
-  }, [projects]);
+    
+    cloudSaveTimer.current = window.setTimeout(async () => {
+      const success = await saveProjectsToCloud(projects);
+      if (success) {
+        console.log('✓ 数据已保存到云端');
+      } else {
+        console.warn('⚠ 云端保存失败，数据已保存在本地');
+      }
+    }, 2000);
+    
+    return () => {
+      if (cloudSaveTimer.current) {
+        clearTimeout(cloudSaveTimer.current);
+      }
+    };
+  }, [projects, isLoading]);
 
   const handleSparkSubmit = () => {
     if (!sparkInput.trim()) return;
@@ -121,6 +187,17 @@ const App: React.FC = () => {
       setProjects(prev => prev.filter(p => p.id !== id));
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-500">正在加载数据...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (view === 'inspiration-wizard' && initialSpark) {
     return <InspirationWizard 
