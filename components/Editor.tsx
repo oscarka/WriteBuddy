@@ -21,8 +21,10 @@ export const Editor: React.FC<Props> = ({ project, onUpdate, onBack }) => {
   const [diffPreview, setDiffPreview] = useState<DiffSegment[] | null>(null);
   const [originalContent, setOriginalContent] = useState('');
   const [isEditing, setIsEditing] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
   const idleTimer = useRef<number | null>(null);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
   
   const currentChapter = project.chapters.find(c => c.id === project.currentChapterId) || project.chapters[0];
 
@@ -505,6 +507,149 @@ export const Editor: React.FC<Props> = ({ project, onUpdate, onBack }) => {
     });
   };
 
+  // 导出功能
+  const exportToMarkdown = () => {
+    let markdown = `# ${project.title}\n\n`;
+    markdown += `**类型**: ${project.type}\n\n`;
+    markdown += `**简介**: ${project.description}\n\n`;
+    markdown += `---\n\n`;
+    
+    project.chapters.forEach((ch, index) => {
+      markdown += `## ${ch.title}\n\n`;
+      markdown += `${ch.content}\n\n`;
+      if (index < project.chapters.length - 1) {
+        markdown += `---\n\n`;
+      }
+    });
+    
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${project.title}.md`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setShowExportMenu(false);
+  };
+
+  const exportToWord = () => {
+    // 创建 HTML 内容
+    let html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>${project.title}</title>
+  <style>
+    body { font-family: 'Microsoft YaHei', SimSun, serif; line-height: 1.8; padding: 40px; max-width: 800px; margin: 0 auto; }
+    h1 { font-size: 28px; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+    h2 { font-size: 22px; margin-top: 30px; margin-bottom: 15px; color: #333; }
+    .meta { color: #666; margin-bottom: 30px; }
+    p { margin-bottom: 15px; text-align: justify; }
+  </style>
+</head>
+<body>
+  <h1>${project.title}</h1>
+  <div class="meta">
+    <p><strong>类型</strong>: ${project.type}</p>
+    <p><strong>简介</strong>: ${project.description}</p>
+  </div>
+  <hr>
+`;
+    
+    project.chapters.forEach((ch) => {
+      html += `  <h2>${ch.title}</h2>\n`;
+      const paragraphs = ch.content.split('\n').filter(p => p.trim());
+      paragraphs.forEach(p => {
+        html += `  <p>${p.trim()}</p>\n`;
+      });
+      html += `  <hr>\n`;
+    });
+    
+    html += `</body>
+</html>`;
+    
+    const blob = new Blob(['\ufeff', html], { type: 'application/msword;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${project.title}.doc`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setShowExportMenu(false);
+  };
+
+  const exportToPDF = async () => {
+    // 使用浏览器打印功能生成 PDF
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('无法打开新窗口，请允许弹出窗口');
+      return;
+    }
+    
+    let html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>${project.title}</title>
+  <style>
+    @media print {
+      @page { margin: 2cm; }
+    }
+    body { font-family: 'Microsoft YaHei', SimSun, serif; line-height: 1.8; padding: 20px; max-width: 800px; margin: 0 auto; }
+    h1 { font-size: 28px; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+    h2 { font-size: 22px; margin-top: 30px; margin-bottom: 15px; color: #333; page-break-after: avoid; }
+    .meta { color: #666; margin-bottom: 30px; }
+    p { margin-bottom: 15px; text-align: justify; page-break-inside: avoid; }
+  </style>
+</head>
+<body>
+  <h1>${project.title}</h1>
+  <div class="meta">
+    <p><strong>类型</strong>: ${project.type}</p>
+    <p><strong>简介</strong>: ${project.description}</p>
+  </div>
+  <hr>
+`;
+    
+    project.chapters.forEach((ch) => {
+      html += `  <h2>${ch.title}</h2>\n`;
+      const paragraphs = ch.content.split('\n').filter(p => p.trim());
+      paragraphs.forEach(p => {
+        html += `  <p>${p.trim()}</p>\n`;
+      });
+      html += `  <hr>\n`;
+    });
+    
+    html += `</body>
+</html>`;
+    
+    printWindow.document.write(html);
+    printWindow.document.close();
+    
+    // 等待内容加载后打印
+    setTimeout(() => {
+      printWindow.print();
+      setShowExportMenu(false);
+    }, 500);
+  };
+
+  // 点击外部关闭导出菜单
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+    
+    if (showExportMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showExportMenu]);
+
   return (
     <div className="h-screen flex flex-col bg-white overflow-hidden">
       {/* Top Navbar */}
@@ -518,7 +663,40 @@ export const Editor: React.FC<Props> = ({ project, onUpdate, onBack }) => {
         </div>
         <div className="flex items-center gap-4">
           <span className="text-xs text-gray-400 font-medium">字数统计: {project.wordCount}</span>
-          <button className="px-5 py-2 bg-indigo-50 text-indigo-700 rounded-full text-xs font-bold hover:bg-indigo-100 transition-colors">导出</button>
+          <div className="relative" ref={exportMenuRef}>
+            <button 
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              className="px-5 py-2 bg-indigo-50 text-indigo-700 rounded-full text-xs font-bold hover:bg-indigo-100 transition-colors flex items-center gap-2"
+            >
+              <span>导出</span>
+              <span className="text-[10px]">▼</span>
+            </button>
+            {showExportMenu && (
+              <div className="absolute right-0 top-full mt-2 bg-white border border-gray-200 rounded-xl shadow-lg py-2 min-w-[160px] z-50">
+                <button
+                  onClick={exportToMarkdown}
+                  className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-3"
+                >
+                  <span className="text-base">📝</span>
+                  <span>Markdown</span>
+                </button>
+                <button
+                  onClick={exportToWord}
+                  className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-3"
+                >
+                  <span className="text-base">📄</span>
+                  <span>Word 文档</span>
+                </button>
+                <button
+                  onClick={exportToPDF}
+                  className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-3"
+                >
+                  <span className="text-base">📑</span>
+                  <span>PDF 文档</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 

@@ -2,8 +2,45 @@
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import { AIMode, AIStyle } from "../types";
 
-const API_KEY = process.env.API_KEY || "";
-const ai = new GoogleGenAI({ apiKey: API_KEY });
+// 使用后端 API 代理（更安全，避免 CORS 问题）
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://genesis-atelier-api-339795034470.us-west1.run.app';
+const USE_BACKEND_API = true; // 使用后端 API 代理
+
+// 直接调用后端 API 的辅助函数
+async function callBackendAPI(model: string, contents: string, config?: any) {
+  const response = await fetch(`${API_BASE_URL}/api/gemini/generate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ model, contents, config })
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+    throw new Error(error.error || `API request failed: ${response.status}`);
+  }
+  
+  const data = await response.json();
+  // 返回兼容 SDK 格式的对象
+  return {
+    text: data.text || '',
+    response: data.response || data
+  };
+}
+
+// 如果使用后端 API，创建一个包装对象来模拟 SDK
+const ai = USE_BACKEND_API ? {
+  models: {
+    generateContent: async (options: any) => {
+      return await callBackendAPI(
+        options.model,
+        options.contents,
+        options.config
+      );
+    }
+  }
+} : new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
 
 export class AIService {
   static async analyzeInspiration(text: string) {

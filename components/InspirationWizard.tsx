@@ -637,8 +637,8 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
                 {editingOutlineIdx === i ? (
                   <div className="space-y-4">
                     <div className="flex gap-6 items-start">
-                      <div className="w-12 h-12 bg-white border border-gray-100 rounded-2xl flex items-center justify-center font-serif text-xl font-bold text-indigo-600 shrink-0">
-                        {i + 1}
+                <div className="w-12 h-12 bg-white border border-gray-100 rounded-2xl flex items-center justify-center font-serif text-xl font-bold text-indigo-600 shrink-0">
+                  {i + 1}
                       </div>
                       <div className="flex-1 space-y-4">
                         <div>
@@ -650,8 +650,8 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
                             className="w-full text-xl font-bold text-gray-800 border-b-2 border-indigo-400 outline-none pb-2 focus:border-indigo-600 transition-colors"
                             placeholder="输入章节标题..."
                           />
-                        </div>
-                        <div>
+                </div>
+                <div>
                           <label className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 block">章节内容</label>
                           <textarea
                             value={editingOutlineDesc}
@@ -693,7 +693,7 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
                     >
                       修改
                     </button>
-                  </div>
+                </div>
                 )}
               </div>
             ))}
