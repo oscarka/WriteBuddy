@@ -12,11 +12,7 @@ RUN npm ci
 # 复制源代码
 COPY . .
 
-# 构建参数：API Key
-ARG GEMINI_API_KEY
-ENV GEMINI_API_KEY=${GEMINI_API_KEY}
-
-# 构建应用（此时环境变量会被注入）
+# 构建应用
 RUN npm run build
 
 # 使用 nginx 提供静态文件服务
