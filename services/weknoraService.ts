@@ -1,6 +1,12 @@
 
 import { Project } from '../types';
 
+// 生产环境使用 Cloud Run 后端 URL，开发环境使用 Vite proxy (空字符串)
+const isProduction = import.meta.env.PROD;
+const API_BASE_URL = isProduction
+    ? 'https://genesis-atelier-api-339795034470.us-west1.run.app'
+    : '';
+
 /**
  * Service to interact with the backend WeKnora proxy endpoints.
  */
@@ -12,7 +18,7 @@ export const WeKnoraService = {
      */
     async createKnowledgeBase(projectId: string, name?: string): Promise<any> {
         try {
-            const response = await fetch(`/api/project/${projectId}/kb/create`, {
+            const response = await fetch(`${API_BASE_URL}/api/project/${projectId}/kb/create`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -41,7 +47,7 @@ export const WeKnoraService = {
             formData.append('file', file);
             formData.append('kbId', kbId);
 
-            const response = await fetch(`/api/project/${projectId}/assets/upload`, {
+            const response = await fetch(`${API_BASE_URL}/api/project/${projectId}/assets/upload`, {
                 method: 'POST',
                 body: formData
             });
@@ -62,7 +68,7 @@ export const WeKnoraService = {
      */
     async listAssets(projectId: string, kbId: string): Promise<any> {
         try {
-            const response = await fetch(`/api/project/${projectId}/assets?kbId=${kbId}`);
+            const response = await fetch(`${API_BASE_URL}/api/project/${projectId}/assets?kbId=${kbId}`);
 
             if (!response.ok) {
                 throw new Error(`List assets failed: ${response.statusText}`);

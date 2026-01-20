@@ -2,8 +2,12 @@
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import { AIMode, AIStyle } from "../types";
 
-// 使用后端 API 代理（更安全，避免 CORS 问题）
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+// 使用后端 API 代理
+// 生产环境使用 Cloud Run 后端 URL，开发环境使用 Vite proxy (空字符串)
+const isProduction = import.meta.env.PROD;
+const API_BASE_URL = isProduction
+  ? 'https://genesis-atelier-api-339795034470.us-west1.run.app'
+  : (import.meta.env.VITE_API_URL || '');
 const USE_BACKEND_API = true; // 使用后端 API 代理
 
 // 直接调用后端 API 的辅助函数
