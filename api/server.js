@@ -2,8 +2,18 @@ import express from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
 import { Storage } from '@google-cloud/storage';
 import cors from 'cors';
-import fetch from 'node-fetch';
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 import FormData from 'form-data';
+
+// Session cache: projectId -> sessionId
+const sessionCache = new Map();
+import multer from 'multer';
+
+// Configure Multer for memory storage (files are streamed to WeKnora)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
+});
 
 const app = express();
 app.use(cors());
@@ -20,6 +30,10 @@ const ai = new GoogleGenAI({ apiKey: API_KEY });
 const storage = new Storage();
 const BUCKET_NAME = process.env.GCS_BUCKET_NAME || 'genesis-atelier-data';
 const DATA_FILE_NAME = 'projects-data.json';
+
+// WeKnora Configuration
+const WEKNORA_BASE_URL = process.env.WEKNORA_BASE_URL || '';
+const WEKNORA_API_KEY = process.env.WEKNORA_API_KEY || '';
 
 // 确保存储桶存在
 async function ensureBucketExists() {
@@ -40,7 +54,9 @@ async function ensureBucketExists() {
 
 ensureBucketExists();
 
-// 统一的 Gemini API 代理端点
+// ==========================================
+// Gemini API Proxy
+// ==========================================
 app.post('/api/gemini/generate', async (req, res) => {
   try {
     const { model, contents, config } = req.body;
@@ -68,7 +84,9 @@ app.post('/api/gemini/generate', async (req, res) => {
   }
 });
 
-// 保存项目数据到 Cloud Storage
+// ==========================================
+// Storage API (Cloud Storage)
+// ==========================================
 app.post('/api/storage/save', async (req, res) => {
   try {
     const { userId, projects } = req.body;
@@ -103,7 +121,6 @@ app.post('/api/storage/save', async (req, res) => {
   }
 });
 
-// 从 Cloud Storage 加载项目数据
 app.get('/api/storage/load', async (req, res) => {
   try {
     const { userId } = req.query;
@@ -137,222 +154,305 @@ app.get('/api/storage/load', async (req, res) => {
   }
 });
 
-// WeKnora API 代理配置
-const WEKNORA_BASE_URL = process.env.WEKNORA_BASE_URL || '';
-const WEKNORA_API_KEY = process.env.WEKNORA_API_KEY || '';
+// ==========================================
+// WeKnora Integration (Phase 1)
+// ==========================================
 
-// 知识库相关接口 - 代理到 WeKnora
-if (WEKNORA_BASE_URL) {
-  // 创建知识库
-  app.post('/api/knowledge/create', async (req, res) => {
-    try {
-      const { name, description, type } = req.body;
-
-      const response = await fetch(`${WEKNORA_BASE_URL}/api/v1/knowledgebases`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': WEKNORA_API_KEY
-        },
-        body: JSON.stringify({ name, description, type: type || 'document' })
-      });
-
-      const data = await response.json();
-      res.json(data);
-    } catch (error) {
-      console.error('WeKnora API error:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // 上传文档到知识库
-  app.post('/api/knowledge/upload', async (req, res) => {
-    try {
-      const { knowledgeBaseId, content, title, url } = req.body;
-
-      // WeKnora API 可能需要不同的格式，这里先实现文本上传
-      const response = await fetch(`${WEKNORA_BASE_URL}/api/v1/knowledgebases/${knowledgeBaseId}/documents`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': WEKNORA_API_KEY
-        },
-        body: JSON.stringify({
-          title: title || 'Untitled',
-          content: content || '',
-          url: url || ''
-        })
-      });
-
-      const data = await response.json();
-      res.json(data);
-    } catch (error) {
-      console.error('WeKnora upload error:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // 搜索知识库
-  app.post('/api/knowledge/search', async (req, res) => {
-    try {
-      const { knowledgeBaseId, query, topK = 5 } = req.body;
-
-      const response = await fetch(`${WEKNORA_BASE_URL}/api/v1/knowledgebases/${knowledgeBaseId}/search`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': WEKNORA_API_KEY
-        },
-        body: JSON.stringify({ query, top_k: topK })
-      });
-
-      const data = await response.json();
-      res.json(data);
-    } catch (error) {
-      console.error('WeKnora search error:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // 获取知识库列表
-  app.get('/api/knowledge/list', async (req, res) => {
-    try {
-      const response = await fetch(`${WEKNORA_BASE_URL}/api/v1/knowledgebases`, {
-        headers: {
-          'x-api-key': WEKNORA_API_KEY
-        }
-      });
-
-      const data = await response.json();
-      res.json(data);
-    } catch (error) {
-      console.error('WeKnora list error:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-} else {
-  // 如果 WeKnora 未配置，提供简单的知识库接口（使用 Firestore + Gemini Embeddings）
-  console.log('WeKnora not configured, using simple knowledge base implementation');
-
-  // 简单的知识库实现（使用 Firestore）
-  app.post('/api/knowledge/save', async (req, res) => {
-    try {
-      const { userId, projectId, source } = req.body;
-
-      if (!userId || !source) {
-        return res.status(400).json({ error: 'userId and source are required' });
-      }
-
-      // 生成向量（使用 Gemini Embeddings）
-      const embeddingResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'models/text-embedding-004',
-          content: { parts: [{ text: `${source.title}\n${source.summary}\n${source.content}` }] }
-        })
-      });
-
-      const embeddingData = await embeddingResponse.json();
-      const embedding = embeddingData.embedding?.values || [];
-
-      // 存储到 Cloud Storage（知识库数据）
-      const knowledgeData = {
-        id: `kb-${Date.now()}`,
-        userId,
-        projectId: projectId || null,
-        source,
-        embedding,
-        createdAt: new Date().toISOString()
-      };
-
-      const bucket = storage.bucket(BUCKET_NAME);
-      const file = bucket.file(`knowledge/${userId}/${knowledgeData.id}.json`);
-      await file.save(JSON.stringify(knowledgeData, null, 2), {
-        contentType: 'application/json'
-      });
-
-      res.json({ success: true, id: knowledgeData.id });
-    } catch (error) {
-      console.error('Error saving knowledge:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  app.post('/api/knowledge/search', async (req, res) => {
-    try {
-      const { userId, query, projectId, topK = 5 } = req.body;
-
-      if (!userId || !query) {
-        return res.status(400).json({ error: 'userId and query are required' });
-      }
-
-      // 生成查询向量
-      const embeddingResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'models/text-embedding-004',
-          content: { parts: [{ text: query }] }
-        })
-      });
-
-      const embeddingData = await embeddingResponse.json();
-      const queryEmbedding = embeddingData.embedding?.values || [];
-
-      // 从 Cloud Storage 加载所有知识库条目
-      const bucket = storage.bucket(BUCKET_NAME);
-      const [files] = await bucket.getFiles({ prefix: `knowledge/${userId}/` });
-
-      const results = [];
-      for (const file of files) {
-        const [contents] = await file.download();
-        const knowledgeData = JSON.parse(contents.toString());
-
-        // 如果指定了 projectId，只返回关联到该项目的
-        if (projectId && knowledgeData.projectId !== projectId) {
-          continue;
-        }
-
-        // 计算余弦相似度
-        const similarity = cosineSimilarity(queryEmbedding, knowledgeData.embedding);
-        results.push({
-          ...knowledgeData.source,
-          similarity,
-          id: knowledgeData.id
-        });
-      }
-
-      // 按相似度排序并返回 topK
-      results.sort((a, b) => b.similarity - a.similarity);
-      res.json({ results: results.slice(0, topK) });
-    } catch (error) {
-      console.error('Error searching knowledge:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-}
-
-// 余弦相似度计算函数
-function cosineSimilarity(vecA, vecB) {
-  if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < vecA.length; i++) {
-    dotProduct += vecA[i] * vecB[i];
-    normA += vecA[i] * vecA[i];
-    normB += vecB[i] * vecB[i];
+// Helper function to call WeKnora API
+async function callWeKnora(endpoint, method = 'GET', body = null, isFormData = false) {
+  if (!WEKNORA_BASE_URL || !WEKNORA_API_KEY) {
+    throw new Error('WeKnora is not configured.');
   }
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+
+  const url = `${WEKNORA_BASE_URL}${endpoint}`;
+  const options = {
+    method,
+    headers: {
+      'x-api-key': WEKNORA_API_KEY
+    }
+  };
+
+  if (body) {
+    if (isFormData) {
+      options.body = body;
+      // CRITICAL: When using node-fetch with form-data, we MUST assign the headers generated by form-data
+      // to the request headers. Do NOT set Content-Type manually to multipart/form-data.
+      Object.assign(options.headers, body.getHeaders());
+    } else {
+      options.headers['Content-Type'] = 'application/json';
+      options.body = JSON.stringify(body);
+    }
+  }
+
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`WeKnora API Error (${response.status}): ${errorText}`);
+  }
+  return response.json();
 }
 
-// 健康检查
+if (WEKNORA_BASE_URL) {
+  // 1. Create Knowledge Base for a Project
+  // POST /api/project/:id/kb/create
+  app.post('/api/project/:id/kb/create', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { name, description } = req.body;
+
+      console.log(`Creating WeKnora KB for project ${id}...`);
+
+      // 1. Fetch Valid Models from WeKnora Cloud
+      const modelsResp = await callWeKnora('/api/v1/models', 'GET');
+      const models = modelsResp.data || [];
+      console.log('Available Models:', models.map(m => ({ id: m.id, name: m.name, type: m.type })));
+
+      const embeddingModel = models.find(m => m.type === 'Embedding');
+      const chatModel = models.find(m => m.type === 'KnowledgeQA');
+
+      if (!embeddingModel || !chatModel) {
+        console.warn('WARNING: converting "Embedding" or "KnowledgeQA" model not found. Using defaults might fail.');
+      }
+
+      const encryptionId = embeddingModel ? embeddingModel.id : "";
+      const llmId = chatModel ? chatModel.id : "";
+
+      const result = await callWeKnora('/api/v1/knowledge-bases', 'POST', {
+        name: name || `Project-${id}`,
+        description: description || `Knowledge base for project ${id}`,
+        type: 'document',
+        embedding_model_id: encryptionId,
+        llm_model_id: llmId,
+        summary_model_id: llmId,
+        qa_model_id: llmId,
+        model_id: llmId,
+        chunking_config: {
+          chunk_size: 500,
+          chunk_overlap: 50,
+          separators: ["\n\n", "\n", "。", "！", "？"]
+        }
+      });
+
+      console.log(`WeKnora KB created:`, result);
+      res.json(result);
+    } catch (error) {
+      console.error('Error creating KB:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 2. list assets
+  // GET /api/project/:id/assets?kbId=...
+  app.get('/api/project/:id/assets', async (req, res) => {
+    try {
+      const { kbId } = req.query;
+      if (!kbId) {
+        return res.status(400).json({ error: 'kbId is required' });
+      }
+
+      // WeKnora API to list knowledge in a KB
+      // Assuming endpoint: GET /api/v1/knowledgebases/:id/knowledge
+      const result = await callWeKnora(`/api/v1/knowledge-bases/${kbId}/knowledge`, 'GET');
+      console.log('List Assets Result (Debug):', JSON.stringify(result, null, 2));
+
+      res.json(result);
+    } catch (error) {
+      console.error('Error listing assets:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 3. Upload Asset (File)
+  // POST /api/project/:id/assets/upload
+  app.post('/api/project/:id/assets/upload', upload.single('file'), async (req, res) => {
+    try {
+      const { kbId } = req.body;
+      const file = req.file;
+
+      if (!kbId) return res.status(400).json({ error: 'kbId is required' });
+      if (!file) return res.status(400).json({ error: 'No file uploaded' });
+
+      // Fix Multer's Latin-1 default encoding for UTF-8 filenames
+      const originalName = Buffer.from(file.originalname, 'latin1').toString('utf8');
+      console.log(`Uploading file: ${originalName} (Original: ${file.originalname})`);
+
+      const formData = new FormData();
+      // Explicitly providing filename and avoiding implicit conversion issues
+      // Using encodeURIComponent to ensure safe ASCII transfer to WeKnora
+      formData.append('file', file.buffer, {
+        filename: originalName,
+        contentType: file.mimetype || 'application/octet-stream',
+      });
+
+      // WeKnora endpoint for file upload: POST /api/v1/knowledgebases/:id/knowledge/file
+      const result = await callWeKnora(
+        `/api/v1/knowledge-bases/${kbId}/knowledge/file`,
+        'POST',
+        formData,
+        true
+      );
+
+      res.json(result);
+    } catch (error) {
+      console.error('Error uploading asset:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 4. Chat Completion (RAG / Standard)
+  // POST /api/project/:id/chat
+  // 4. Chat Completion (RAG via Search + Gemini)
+  // POST /api/project/:id/chat
+  app.post('/api/project/:id/chat', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { messages, kbId, stream } = req.body;
+
+      console.log(`[Chat] Request for Project ${id} (KB: ${kbId})`);
+
+      if (!kbId) {
+        // Fallback to simple Gemini if no KB
+        // Similar to /api/gemini/generate but adapting format
+        const lastMsg = messages[messages.length - 1].content;
+        // ... logic similar to below but without context
+        // For now, error out or simple handle
+        return res.status(400).json({ error: "Missing KB ID for RAG chat" });
+      }
+
+      // 1. Extract Query (Last user message)
+      const lastUserMsg = messages.reverse().find(m => m.role === 'user');
+      const query = lastUserMsg ? lastUserMsg.content : "Continue writing.";
+
+      console.log(`[RAG] Searching WeKnora for: "${query}"`);
+
+      // 2. Search WeKnora (Session-based RAG with explicit KB ID)
+      // We create a session and then pass the KB ID in the CHAT request (essential).
+      console.log(`[RAG] Initiating DIRECT Chunk Loading (bypassing slow Agent)...`);
+
+      let chunks = [];
+      const MAX_CONTEXT_CHARS = 30000;
+      let currentContextSize = 0;
+
+      try {
+        // Step 2.1: List all assets (files) in the Knowledge Base
+        const assetsRes = await callWeKnora(`/api/v1/knowledge-bases/${kbId}/knowledge`, 'GET');
+
+        if (assetsRes && assetsRes.data && assetsRes.data.length > 0) {
+          console.log(`[RAG] Found ${assetsRes.data.length} assets in KB. Loading chunks...`);
+
+          for (const asset of assetsRes.data) {
+            if (currentContextSize >= MAX_CONTEXT_CHARS) break;
+
+            try {
+              // Step 2.2: Load chunks for each asset
+              const chunksRes = await callWeKnora(`/api/v1/chunks/${asset.id}`, 'GET');
+              if (chunksRes && chunksRes.data && chunksRes.data.length > 0) {
+                console.log(`[RAG] Asset "${asset.title}": Loaded ${chunksRes.data.length} chunks`);
+
+                for (const c of chunksRes.data) {
+                  if (currentContextSize + c.content.length > MAX_CONTEXT_CHARS) break;
+
+                  chunks.push({
+                    id: c.id,
+                    knowledge_title: asset.title,
+                    content: c.content
+                  });
+                  currentContextSize += c.content.length;
+                }
+              }
+            } catch (e) {
+              console.error(`[RAG] Failed to load chunks for asset ${asset.id}: ${e.message}`);
+            }
+          }
+        } else {
+          console.log(`[RAG] No assets found in KB ${kbId}.`);
+        }
+      } catch (err) {
+        console.error("[RAG] Error in Direct Loading Flow:", err.message);
+      }
+
+      console.log(`[RAG] Loaded ${chunks.length} chunks, Total size: ${currentContextSize} chars`);
+
+      // 3. Process Context from Chunks
+      let context = "";
+      if (chunks && chunks.length > 0) {
+        console.log(`[RAG] Found ${chunks.length} chunks. Formatting context...`);
+        // Deduplicate based on ID
+        const seen = new Set();
+        const uniqueChunks = [];
+        for (const c of chunks) {
+          if (!seen.has(c.id)) {
+            seen.add(c.id);
+            uniqueChunks.push(c);
+          }
+        }
+
+        context = uniqueChunks.map((chunk, index) => {
+          return `[参考资料 ${index + 1}] (来自: ${chunk.knowledge_title || '未知文件'})\n${chunk.content}`;
+        }).join("\n\n");
+      } else {
+        console.log("[RAG] Found 0 chunks. Context length: 0");
+      }
+
+      // 4. Generate with Gemini
+      const SystemPrompt = `你是一位专业的中文创意写作助手。
+请根据以下检索到的背景资料（Context），延续用户的故事情节。
+如果资料中包含特定的专有名词、设定或剧情点，请准确使用。
+请保持原文的风格和语调。
+必须使用中文（Chinese）回答。
+输出时请紧凑排版，段落之间只空一行，不要有过多空行。
+
+相关背景资料 (Context):
+${context}
+
+用户当前故事段落 (User Request): "${query}"`;
+
+      console.log('[Gemini] Sending prompt to Google AI...');
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.0-flash-exp',
+        contents: SystemPrompt
+      });
+      console.log('[Gemini] Response received.');
+
+      // Clean up excessive newlines (only allow single line breaks)
+      let responseText = response.text || "I'm not sure how to continue based on that.";
+      responseText = responseText.replace(/\n{2,}/g, '\n');
+
+      // 5. Return in OpenAI-compatible format for Frontend
+      res.json({
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: responseText
+            }
+          }
+        ]
+      });
+
+    } catch (error) {
+      console.error('[Chat] RAG Error:', error);
+      res.status(500).json({ error: error.message, details: error.toString() });
+    }
+  });
+
+  // Legacy/Compatibility endpoints (can be phased out or kept for transition)
+  app.post('/api/knowledge/create', async (req, res) => { /* ... existing logic redirected to new flow ideally ... */ });
+  // ... (Keeping old endpoints might be necessary if frontend still uses them temporarily, 
+  // but for "Phase 1" we focus on the new ones. I will comment them out to force clean usage or redirect)
+
+} else {
+  console.log('WeKnora not configured. Phase 1 features disabled.');
+  // Fallback implementations can go here if needed
+}
+
+// Health Check
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     hasApiKey: !!API_KEY,
-    hasWeKnora: !!WEKNORA_BASE_URL
+    hasWeKnora: !!WEKNORA_BASE_URL,
+    version: 'phase-1'
   });
 });
 
@@ -360,4 +460,5 @@ const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`API server running on port ${PORT}`);
   console.log(`API Key configured: ${API_KEY ? 'Yes' : 'No'}`);
+  console.log(`WeKnora Base URL: ${WEKNORA_BASE_URL}`);
 });

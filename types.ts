@@ -16,6 +16,7 @@ export interface Project {
   currentChapterId: string;
   aiMode: string;
   style: string;
+  kbId?: string; // WeKnora Knowledge Base ID
 }
 
 export interface InspirationDirection {

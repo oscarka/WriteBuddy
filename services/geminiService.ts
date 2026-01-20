@@ -3,7 +3,7 @@ import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import { AIMode, AIStyle } from "../types";
 
 // 使用后端 API 代理（更安全，避免 CORS 问题）
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://genesis-atelier-api-339795034470.us-west1.run.app';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 const USE_BACKEND_API = true; // 使用后端 API 代理
 
 // 直接调用后端 API 的辅助函数
@@ -15,12 +15,12 @@ async function callBackendAPI(model: string, contents: string, config?: any) {
     },
     body: JSON.stringify({ model, contents, config })
   });
-  
+
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
     throw new Error(error.error || `API request failed: ${response.status}`);
   }
-  
+
   const data = await response.json();
   // 返回兼容 SDK 格式的对象
   return {
@@ -187,5 +187,40 @@ export class AIService {
       contents: `在保持原意的基础上，润色并提高这段文字的文学质量：“${text}”`
     });
     return response.text;
+  }
+
+  // Phase 3: WeKnora Knowledge Base Chat
+  static async chatWithProject(projectId: string, kbId: string | undefined, messages: any[], context?: any) {
+    if (!USE_BACKEND_API) {
+      throw new Error("Backend API must be enabled for RAG features.");
+    }
+
+    try {
+      const payload = {
+        messages: messages,
+        kbId: kbId,
+        stream: false, // For now, simple response
+        context: context // Optional extra context passed to backend if needed (e.g. L2 outline)
+      };
+
+      const response = await fetch(`${API_BASE_URL}/api/project/${projectId}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || `Chat API failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // Adapt WeKnora/OpenAI response format to simple text
+      // Assuming data.choices[0].message.content
+      return data.choices?.[0]?.message?.content || data.response || "No response generated.";
+    } catch (error: any) {
+      console.error("AI Service Error:", error);
+      return `Error: ${error.message}`;
+    }
   }
 }
