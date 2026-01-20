@@ -76,63 +76,96 @@ const App: React.FC = () => {
     const loadData = async () => {
       try {
         setIsLoading(true);
-        // 先尝试从 Cloud Storage 加载
-        const cloudProjects = await loadProjectsFromCloud();
-        if (cloudProjects && cloudProjects.length > 0) {
-          setProjects(cloudProjects);
-          // 同步到 localStorage 作为备份
-          localStorage.setItem('genesis_projects', JSON.stringify(cloudProjects));
-          return;
+
+        // 1. 并行加载云端和本地数据
+        const [cloudProjects, localString] = await Promise.all([
+          loadProjectsFromCloud().catch(err => {
+            console.warn('Cloud load failed, ignoring:', err);
+            return null;
+          }),
+          Promise.resolve(localStorage.getItem('genesis_projects'))
+        ]);
+
+        const localProjects: Project[] = localString ? JSON.parse(localString) : [];
+        let finalProjects: Project[] = [];
+        let hasChanges = false;
+
+        if (!cloudProjects || cloudProjects.length === 0) {
+          // 场景 A: 只有本地数据，或者云端为空
+          finalProjects = localProjects.length > 0 ? localProjects : MOCK_PROJECTS;
+          // 如果是本地数据，需要同步到云端
+          if (localProjects.length > 0) hasChanges = true;
+        } else if (localProjects.length === 0) {
+          // 场景 B: 只有云端数据
+          finalProjects = cloudProjects;
+        } else {
+          // 场景 C: 两边都有数据 -> 智能合并（基于 lastEdited）
+          const projectMap = new Map<string, Project>();
+
+          // 先放入云端数据
+          cloudProjects.forEach(p => projectMap.set(p.id, p));
+
+          // 遍历本地数据进行对比
+          localProjects.forEach(localP => {
+            const cloudP = projectMap.get(localP.id);
+            if (!cloudP) {
+              // 本地有但云端没有 -> 保留本地（可能是新建的）
+              projectMap.set(localP.id, localP);
+              hasChanges = true;
+            } else {
+              // 两边都有 -> 比较时间戳
+              if (localP.lastEdited > cloudP.lastEdited) {
+                // 本地更新 -> 使用本地版本
+                console.log(`[Sync] Local project ${localP.title} is newer (${localP.lastEdited} > ${cloudP.lastEdited}). Keeping local.`);
+                projectMap.set(localP.id, localP);
+                hasChanges = true;
+              } else {
+                // 云端更新或一样 -> 使用云端版本
+                console.log(`[Sync] Cloud project ${cloudP.title} is newer or same. Keeping cloud.`);
+              }
+            }
+          });
+
+          finalProjects = Array.from(projectMap.values());
         }
-        
-        // 如果云端没有数据，尝试从 localStorage 加载
-        const saved = localStorage.getItem('genesis_projects');
-        if (saved) {
-          const localProjects = JSON.parse(saved);
-          if (localProjects && localProjects.length > 0) {
-            setProjects(localProjects);
-            // 将本地数据同步到云端
-            await saveProjectsToCloud(localProjects);
-            return;
-          }
+
+        // 设置状态
+        setProjects(finalProjects);
+
+        // 如果合并结果比云端新，触发保存
+        if (hasChanges) {
+          console.log('[Sync] Syncing merged data back to cloud...');
+          saveProjectsToCloud(finalProjects);
         }
-        
-        // 都没有则使用默认数据
-        setProjects(MOCK_PROJECTS);
+
+        // 总是更新本地缓存
+        localStorage.setItem('genesis_projects', JSON.stringify(finalProjects));
+
       } catch (error) {
         console.error('Error loading data:', error);
-        // 出错时从 localStorage 加载
-        const saved = localStorage.getItem('genesis_projects');
-        if (saved) {
-          const localProjects = JSON.parse(saved);
-          if (localProjects && localProjects.length > 0) {
-            setProjects(localProjects);
-          } else {
-            setProjects(MOCK_PROJECTS);
-          }
-        } else {
-          setProjects(MOCK_PROJECTS);
-        }
+        // 出错时的保底逻辑已经不需要太复杂，因为 try 块里尽力了
+        // 如果这里出错，可能是严重的系统错误
+        setProjects(MOCK_PROJECTS);
       } finally {
         setIsLoading(false);
       }
     };
-    
+
     loadData();
   }, []);
 
   // 保存数据：同时保存到 localStorage 和 Cloud Storage（防抖）
   useEffect(() => {
     if (projects.length === 0 || isLoading) return;
-    
+
     // 立即保存到 localStorage
     localStorage.setItem('genesis_projects', JSON.stringify(projects));
-    
+
     // 防抖保存到云端（延迟 2 秒）
     if (cloudSaveTimer.current) {
       clearTimeout(cloudSaveTimer.current);
     }
-    
+
     cloudSaveTimer.current = window.setTimeout(async () => {
       const success = await saveProjectsToCloud(projects);
       if (success) {
@@ -141,7 +174,7 @@ const App: React.FC = () => {
         console.warn('⚠ 云端保存失败，数据已保存在本地');
       }
     }, 2000);
-    
+
     return () => {
       if (cloudSaveTimer.current) {
         clearTimeout(cloudSaveTimer.current);
@@ -166,7 +199,7 @@ const App: React.FC = () => {
       wordCount: 0,
       lastEdited: Date.now(),
       chapters: data.outline.map((ch: any, i: number) => ({
-        id: i === 0 ? firstChapterId : `ch${i+1}`,
+        id: i === 0 ? firstChapterId : `ch${i + 1}`,
         title: ch.title,
         content: `【创作背景】: ${ch.description}\n\n---\n\n在这里开始你的创作...`
       })),
@@ -200,18 +233,18 @@ const App: React.FC = () => {
   }
 
   if (view === 'inspiration-wizard' && initialSpark) {
-    return <InspirationWizard 
-      initialInput={initialSpark} 
-      onCancel={() => { setView('dashboard'); setInitialSpark(null); }} 
-      onComplete={createProjectFromInspiration} 
+    return <InspirationWizard
+      initialInput={initialSpark}
+      onCancel={() => { setView('dashboard'); setInitialSpark(null); }}
+      onComplete={createProjectFromInspiration}
     />;
   }
 
   if (view === 'editor' && projects.find(p => p.id === activeProjectId)) {
-    return <Editor 
-      project={projects.find(p => p.id === activeProjectId)!} 
-      onUpdate={(updated) => setProjects(prev => prev.map(p => p.id === updated.id ? updated : p))} 
-      onBack={() => setView('dashboard')} 
+    return <Editor
+      project={projects.find(p => p.id === activeProjectId)!}
+      onUpdate={(updated) => setProjects(prev => prev.map(p => p.id === updated.id ? updated : p))}
+      onBack={() => setView('dashboard')}
     />;
   }
 
@@ -262,12 +295,12 @@ const App: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
             {projects.map(p => (
-              <div 
+              <div
                 key={p.id}
                 onClick={() => { setActiveProjectId(p.id); setView('editor'); }}
                 className="bg-white p-10 rounded-[2.5rem] border border-gray-100 shadow-sm hover:shadow-[0_20px_50px_rgba(0,0,0,0.05)] hover:-translate-y-2 transition-all cursor-pointer flex flex-col group relative"
               >
-                <button 
+                <button
                   onClick={(e) => deleteProject(p.id, e)}
                   className="absolute top-8 right-8 p-2 text-gray-200 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity z-10"
                 >
@@ -279,7 +312,7 @@ const App: React.FC = () => {
                 </div>
                 <h3 className="text-3xl font-serif font-bold text-gray-800 mb-4 group-hover:text-indigo-600 transition-colors leading-tight">{p.title}</h3>
                 <p className="text-gray-400 text-sm line-clamp-2 mb-10 italic leading-loose">“{p.description}”</p>
-                
+
                 <div className="pt-8 border-t border-gray-50 flex items-center justify-between mt-auto">
                   <div className="flex flex-col">
                     <span className="text-sm font-bold text-gray-700">{p.wordCount.toLocaleString()} 字</span>
@@ -294,7 +327,7 @@ const App: React.FC = () => {
           </div>
         </section>
       </main>
-      
+
       <footer className="h-24 border-t flex items-center justify-center bg-gray-50/50">
         <p className="text-gray-400 text-sm font-light tracking-widest uppercase">© 2025 Genesis Atelier. 由 Gemini 3 提供 AI 驱动支持.</p>
       </footer>
