@@ -9,8 +9,10 @@ export function generateBibleContent(data: {
     description: string;
     research: ResearchData;
     outline: Array<{ title: string; description: string }>;
+    researchSources?: Array<{ title: string; summary: string; url?: string; content?: string }>;
+    originalSpark?: string;
 }): string {
-    const { title, description, research, outline } = data;
+    const { title, description, research, outline, researchSources, originalSpark } = data;
 
     const sections: string[] = [];
 
@@ -19,6 +21,14 @@ export function generateBibleContent(data: {
     sections.push('');
     sections.push(`> 本文档由灵感向导自动生成，记录了故事的核心设定。您可以随时编辑此文档，AI 将自动读取最新内容。`);
     sections.push('');
+
+    // Original Spark
+    if (originalSpark) {
+        sections.push('## 灵感缘起 (Original Spark)');
+        sections.push('');
+        sections.push(`> "${originalSpark}"`);
+        sections.push('');
+    }
 
     // Logline
     sections.push('## 核心概念 (Logline)');
@@ -72,6 +82,27 @@ export function generateBibleContent(data: {
         });
     } else {
         sections.push('（待补充）');
+        sections.push('');
+    }
+
+    // Research Sources
+    if (researchSources && researchSources.length > 0) {
+        sections.push('## 参考素材 (References)');
+        sections.push('');
+        researchSources.forEach((source, i) => {
+            sections.push(`### [${i + 1}] ${source.title}`);
+            if (source.url) {
+                sections.push(`- **来源**: ${source.url}`);
+            }
+            if (source.summary) {
+                sections.push(`- **摘要**: ${source.summary}`);
+            }
+            // Optional: Include full content if needed, but summary is usually enough for the bible
+            // if (source.content) {
+            //    sections.push(`> ${source.content.slice(0, 200)}...`);
+            // }
+            sections.push('');
+        });
         sections.push('');
     }
 

@@ -5,6 +5,7 @@ import { Storage } from '@google-cloud/storage';
 import cors from 'cors';
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 import FormData from 'form-data';
+import * as agentService from './agentService.js';
 
 // Session cache: projectId -> sessionId
 const sessionCache = new Map();
@@ -470,6 +471,58 @@ ${context}
     }
   });
 
+  // 5. Agentic Chat (Smart Router)
+  // POST /api/project/:id/agent-chat
+  app.post('/api/project/:id/agent-chat', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { messages, kbId } = req.body;
+      const lastMsg = messages[messages.length - 1].content;
+
+      console.log(`[Agent] Processing request for Project ${id}...`);
+
+      // 1. Route Intent
+      const intent = await agentService.classifyIntent(messages, lastMsg);
+      console.log(`[Agent] Router Decision: ${intent.action}`, intent);
+
+      let responseContent = "";
+
+      if (intent.action === 'CHAT') {
+        // Fast Path
+        responseContent = await agentService.directChat(messages);
+
+      } else if (intent.action === 'DEEP_RESEARCH') {
+        // Advanced Path
+        responseContent = await agentService.deepResearch(intent.payload.query || lastMsg);
+
+      } else {
+        // SEARCH_KB (RAG)
+        // Reuse existing RAG endpoint via internal fetch to ensure consistency
+        // Using "localhost" assuming local env
+        const PORT = process.env.PORT || 8080;
+        const ragRes = await fetch(`http://127.0.0.1:${PORT}/api/project/${id}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(req.body)
+        });
+
+        const data = await ragRes.json();
+        // Extract content from OpenAI format
+        responseContent = data.choices?.[0]?.message?.content || data.error || "Error in RAG";
+      }
+
+      // Return standard format
+      res.json({
+        choices: [{ message: { role: 'assistant', content: responseContent } }],
+        agent_log: intent // Optional: expose reasoning to UI
+      });
+
+    } catch (error) {
+      console.error('[Agent] Error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Legacy/Compatibility endpoints (can be phased out or kept for transition)
   app.post('/api/knowledge/create', async (req, res) => { /* ... existing logic redirected to new flow ideally ... */ });
   // ... (Keeping old endpoints might be necessary if frontend still uses them temporarily, 
@@ -490,7 +543,54 @@ app.get('/health', (req, res) => {
   });
 });
 
-const PORT = process.env.PORT || 8080;
+
+// [NEW] Get Asset Content (Proxy or Reconstruct from Chunks)
+app.get('/api/project/:id/assets/:assetId/content', async (req, res) => {
+  try {
+    const { id, assetId } = req.params;
+    const kbId = req.query.kbId;
+
+    console.log(`[AssetContent] Fetching content for asset ${assetId} (Project: ${id})`);
+
+    // 1. Try to get chunks (Reliable fallback)
+    // WeKnora stores text in chunks.
+    const chunksRes = await callWeKnora(`/api/v1/chunks/${assetId}`, 'GET');
+
+    let fullContent = "";
+    if (chunksRes && chunksRes.data && chunksRes.data.length > 0) {
+      // Sort by index if available, otherwise assume order
+      const sortedChunks = chunksRes.data.sort((a, b) => (a.chunk_index || 0) - (b.chunk_index || 0));
+      fullContent = sortedChunks.map(c => c.content).join("\n\n"); // Join with spacing to be safe
+    } else {
+      fullContent = "No text content found for this asset.";
+    }
+
+    res.json({ success: true, content: fullContent });
+
+  } catch (error) {
+    console.error("Asset Content Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+// [NEW] Delete Asset Route (For Updates/Removal)
+app.delete('/api/project/:id/assets/:assetId', async (req, res) => {
+  try {
+    const { assetId } = req.params;
+    console.log(`[DeleteAsset] Deleting asset ${assetId}`);
+
+    // Try 'knowledge' endpoint first
+    let response = await callWeKnora(`/api/v1/knowledge/${assetId}`, 'DELETE');
+
+    res.json(response || { success: true });
+  } catch (error) {
+    console.error("Delete Asset Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+const PORT = process.env.PORT || 8081;
 app.listen(PORT, () => {
   console.log(`API server running on port ${PORT}`);
   console.log(`API Key configured: ${API_KEY ? 'Yes' : 'No'}`);

@@ -82,5 +82,35 @@ export const WeKnoraService = {
             console.error('WeKnoraService listAssets error:', error);
             return { assets: [], error: error.message };
         }
+    },
+
+    /**
+     * Fetch the full text content of an asset (reconstructed from chunks).
+     */
+    async getAssetContent(projectId: string, kbId: string, assetId: string): Promise<any> {
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/project/${projectId}/assets/${assetId}/content?kbId=${kbId}`);
+            if (!response.ok) throw new Error("Failed to fetch content");
+            return await response.json();
+        } catch (error: any) {
+            console.error('GetAssetContent error:', error);
+            return { success: false, content: '' };
+        }
+    },
+
+    /**
+     * Delete an asset from the Knowledge Base.
+     */
+    async deleteAsset(projectId: string, assetId: string): Promise<any> {
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/project/${projectId}/assets/${assetId}`, {
+                method: 'DELETE'
+            });
+            if (!response.ok) throw new Error("Failed to delete asset");
+            return await response.json();
+        } catch (error: any) {
+            console.error('DeleteAsset error:', error);
+            return { success: false, error: error.message };
+        }
     }
 };

@@ -195,6 +195,8 @@ const App: React.FC = () => {
     description: string;
     outline: Array<{ title: string; description: string }>;
     research: ResearchData;
+    researchSources?: Array<{ title: string; summary: string; url?: string; content?: string }>;
+    originalSpark?: string;
   }) => {
     const newId = `project-${Date.now()}`;
     const firstChapterId = 'ch1';

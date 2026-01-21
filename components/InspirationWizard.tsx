@@ -5,7 +5,14 @@ import { InspirationDirection, ResearchData, ResearchSource } from '../types';
 
 interface Props {
   initialInput?: string;
-  onComplete: (data: { title: string, description: string, outline: any[], research: ResearchData }) => void;
+  onComplete: (data: {
+    title: string,
+    description: string,
+    outline: any[],
+    research: ResearchData,
+    researchSources: ResearchSource[],
+    originalSpark?: string
+  }) => void;
   onCancel: () => void;
 }
 
@@ -149,7 +156,9 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
       title: selectedDirection!.title,
       description: selectedDirection!.description,
       outline,
-      research: research!
+      research: research!,
+      researchSources,
+      originalSpark: input
     });
   };
 
@@ -389,254 +398,242 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
       )}
 
       {step === 'research' && research && (
-        <div className="max-w-6xl w-full px-8 space-y-12 animate-in slide-in-from-bottom-6 duration-500 pb-20">
-          <div className="text-center">
+        <div className="w-full h-full flex flex-col px-8 pb-8 animate-in slide-in-from-bottom-6 duration-500 overflow-hidden">
+          <div className="text-center shrink-0 mb-6">
             <h2 className="text-4xl font-serif font-bold text-gray-800">研究摘要</h2>
-            <p className="text-gray-500 mt-4 text-lg">已为您规划的路径 "{selectedDirection?.title}" 准备好背景资料（可编辑）：</p>
+            <p className="text-gray-500 mt-2 text-lg">已为您规划的路径 "{selectedDirection?.title}" 准备好背景资料：</p>
           </div>
 
-          {/* 研究素材搜索框 */}
-          <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm">
-            <div className="flex gap-3">
-              <input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && searchQuery.trim() && !isSearching) {
-                    handleSearchMaterials();
-                  }
-                }}
-                placeholder="搜索相关研究素材、参考资料、案例..."
-                className="flex-1 px-6 py-4 text-base border border-gray-200 rounded-2xl outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-50"
-              />
-              <button
-                onClick={handleSearchMaterials}
-                disabled={!searchQuery.trim() || isSearching}
-                className="px-8 py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
-              >
-                {isSearching ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>搜索中...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>🔍</span>
-                    <span>搜索</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-            {/* 核心背景 - 可编辑 */}
-            <div className="bg-gray-50 p-10 rounded-[2.5rem] border border-gray-100 group flex flex-col">
-              <h3 className="font-bold text-xl mb-6 flex items-center gap-3">
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6 min-h-0">
+            {/* 左栏：核心背景 - 全高 */}
+            <div className="bg-gray-50 p-6 rounded-[2rem] border border-gray-100 group flex flex-col h-full overflow-hidden">
+              <h3 className="font-bold text-xl mb-4 flex items-center gap-3 shrink-0">
                 <span className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white text-xs">A</span>
                 核心背景
               </h3>
               <textarea
                 value={research.background}
                 onChange={(e) => updateResearchBackground(e.target.value)}
-                className="w-full flex-1 min-h-[500px] p-4 text-gray-600 leading-loose text-lg bg-white border border-gray-200 rounded-2xl outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-50 resize-y transition-all"
+                className="w-full flex-1 p-4 text-gray-600 leading-loose text-lg bg-white border border-gray-200 rounded-2xl outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-50 resize-none transition-all"
                 placeholder="输入核心背景信息..."
               />
             </div>
 
-            <div className="space-y-8">
-              {/* 角色原型 - 可编辑 */}
-              <div>
-                <h3 className="font-bold text-lg mb-4 text-gray-700 uppercase tracking-widest">角色原型</h3>
-                <div className="flex flex-wrap gap-3 mb-4">
-                  {research.characters.map((c, i) => (
-                    <div key={i} className="group relative">
-                      {editingCharacterIdx === i ? (
-                        <div className="flex items-center gap-2">
+            {/* 中栏：角色/术语 + 确认按钮 */}
+            <div className="flex flex-col gap-6 h-full min-h-0">
+              {/* 角色与术语容器 */}
+              <div className="flex-1 flex flex-col gap-6 overflow-y-auto pr-2">
+                {/* 角色原型 */}
+                <div className="bg-gray-50/50 p-6 rounded-[2rem] border border-gray-100">
+                  <h3 className="font-bold text-lg mb-3 text-gray-700 uppercase tracking-widest">角色原型</h3>
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {research.characters.map((c, i) => (
+                      <div key={i} className="group relative">
+                        {editingCharacterIdx === i ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              autoFocus
+                              value={c}
+                              onChange={(e) => updateCharacter(i, e.target.value)}
+                              onBlur={() => setEditingCharacterIdx(null)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.currentTarget.blur();
+                                }
+                              }}
+                              className="px-4 py-1.5 bg-white border-2 border-indigo-400 rounded-full text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100"
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 group">
+                            <span
+                              onClick={() => setEditingCharacterIdx(i)}
+                              className="px-4 py-1.5 bg-white border border-gray-200 rounded-full text-sm font-medium shadow-sm hover:border-indigo-400 transition-colors cursor-pointer"
+                            >
+                              {c}
+                            </span>
+                            <button
+                              onClick={() => deleteCharacter(i)}
+                              className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 text-xs font-bold transition-opacity"
+                              title="删除"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      value={newCharacter}
+                      onChange={(e) => setNewCharacter(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newCharacter.trim()) {
+                          addCharacter();
+                        }
+                      }}
+                      placeholder="添加新角色..."
+                      className="flex-1 px-4 py-1.5 text-sm border border-gray-200 rounded-full outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-50"
+                    />
+                    <button
+                      onClick={addCharacter}
+                      disabled={!newCharacter.trim()}
+                      className="px-4 py-1.5 bg-indigo-600 text-white rounded-full text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+
+                {/* 关键术语与意象 */}
+                <div className="bg-gray-50/50 p-6 rounded-[2rem] border border-gray-100">
+                  <h3 className="font-bold text-lg mb-3 text-gray-700 uppercase tracking-widest">关键术语</h3>
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {research.terms.map((t, i) => (
+                      <div key={i} className="group relative">
+                        {editingTermIdx === i ? (
                           <input
                             autoFocus
-                            value={c}
-                            onChange={(e) => updateCharacter(i, e.target.value)}
-                            onBlur={() => setEditingCharacterIdx(null)}
+                            value={t}
+                            onChange={(e) => updateTerm(i, e.target.value)}
+                            onBlur={() => setEditingTermIdx(null)}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') {
                                 e.currentTarget.blur();
                               }
                             }}
-                            className="px-5 py-2 bg-white border-2 border-indigo-400 rounded-full text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-100"
+                            className="px-3 py-1 bg-white border-2 border-indigo-400 rounded-lg text-indigo-500 font-mono text-sm outline-none focus:ring-2 focus:ring-indigo-100"
                           />
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2 group">
-                          <span
-                            onClick={() => setEditingCharacterIdx(i)}
-                            className="px-5 py-2 bg-white border border-gray-200 rounded-full text-sm font-medium shadow-sm hover:border-indigo-400 transition-colors cursor-pointer"
-                          >
-                            {c}
-                          </span>
-                          <button
-                            onClick={() => deleteCharacter(i)}
-                            className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 text-xs font-bold transition-opacity"
-                            title="删除"
-                          >
-                            ×
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    value={newCharacter}
-                    onChange={(e) => setNewCharacter(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newCharacter.trim()) {
-                        addCharacter();
-                      }
-                    }}
-                    placeholder="添加新角色..."
-                    className="flex-1 px-4 py-2 text-sm border border-gray-200 rounded-full outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-50"
-                  />
-                  <button
-                    onClick={addCharacter}
-                    disabled={!newCharacter.trim()}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-full text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                  >
-                    + 添加
-                  </button>
-                </div>
-              </div>
-
-              {/* 关键术语与意象 - 可编辑 */}
-              <div className="p-8 border border-dashed border-gray-200 rounded-3xl">
-                <h3 className="font-bold text-lg mb-4 text-gray-700 uppercase tracking-widest">关键术语与意象</h3>
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {research.terms.map((t, i) => (
-                    <div key={i} className="group relative">
-                      {editingTermIdx === i ? (
-                        <input
-                          autoFocus
-                          value={t}
-                          onChange={(e) => updateTerm(i, e.target.value)}
-                          onBlur={() => setEditingTermIdx(null)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.currentTarget.blur();
-                            }
-                          }}
-                          className="px-3 py-1 bg-white border-2 border-indigo-400 rounded-lg text-indigo-500 font-mono text-sm outline-none focus:ring-2 focus:ring-indigo-100"
-                        />
-                      ) : (
-                        <div className="flex items-center gap-1 group">
-                          <span
-                            onClick={() => setEditingTermIdx(i)}
-                            className="text-indigo-500 font-mono text-sm cursor-pointer hover:text-indigo-700 transition-colors"
-                          >
-                            #{t}
-                          </span>
-                          <button
-                            onClick={() => deleteTerm(i)}
-                            className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 text-xs font-bold transition-opacity"
-                            title="删除"
-                          >
-                            ×
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    value={newTerm}
-                    onChange={(e) => setNewTerm(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newTerm.trim()) {
-                        addTerm();
-                      }
-                    }}
-                    placeholder="添加新术语..."
-                    className="flex-1 px-3 py-1 text-sm border border-gray-200 rounded-lg outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-50 font-mono"
-                  />
-                  <button
-                    onClick={addTerm}
-                    disabled={!newTerm.trim()}
-                    className="px-4 py-1 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                  >
-                    + 添加
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* 研究素材列表 */}
-          {researchSources.length > 0 && (
-            <div className="space-y-6 mt-12">
-              <div className="flex items-center justify-between border-b border-gray-200 pb-4">
-                <h3 className="text-2xl font-serif font-bold text-gray-800">研究素材</h3>
-                <span className="text-sm text-gray-500">共 {researchSources.length} 条结果</span>
-              </div>
-              <div className="space-y-4">
-                {researchSources.map((source) => (
-                  <div
-                    key={source.id}
-                    className="bg-white border border-gray-200 rounded-2xl overflow-hidden hover:shadow-lg transition-all"
-                  >
-                    <div
-                      className="p-6 cursor-pointer"
-                      onClick={() => setExpandedSourceId(expandedSourceId === source.id ? null : source.id)}
+                        ) : (
+                          <div className="flex items-center gap-1 group">
+                            <span
+                              onClick={() => setEditingTermIdx(i)}
+                              className="text-indigo-500 font-mono text-sm cursor-pointer hover:text-indigo-700 transition-colors"
+                            >
+                              #{t}
+                            </span>
+                            <button
+                              onClick={() => deleteTerm(i)}
+                              className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 text-xs font-bold transition-opacity"
+                              title="删除"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      value={newTerm}
+                      onChange={(e) => setNewTerm(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newTerm.trim()) {
+                          addTerm();
+                        }
+                      }}
+                      placeholder="添加新术语..."
+                      className="flex-1 px-3 py-1 text-sm border border-gray-200 rounded-lg outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-50 font-mono"
+                    />
+                    <button
+                      onClick={addTerm}
+                      disabled={!newTerm.trim()}
+                      className="px-4 py-1 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                     >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <h4 className="text-lg font-bold text-gray-800">{source.title}</h4>
+                      +
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 确认按钮 - 放在中栏底部 */}
+              <button
+                onClick={handleConfirmResearch}
+                disabled={isLoading}
+                className="w-full py-4 bg-black text-white rounded-2xl font-bold text-lg hover:bg-gray-800 transition-all shadow-xl active:scale-95 shrink-0"
+              >
+                {isLoading ? '正在构思章节框架...' : '确认并生成大纲 →'}
+              </button>
+            </div>
+
+            {/* 右栏：搜索 + 素材列表 (全高) */}
+            <div className="flex flex-col gap-4 h-full min-h-0 bg-white p-4 rounded-[2rem] border border-gray-200 shadow-sm relative">
+              {/* 搜索框 */}
+              <div className="shrink-0">
+                <div className="flex gap-2">
+                  <input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && searchQuery.trim() && !isSearching) {
+                        handleSearchMaterials();
+                      }
+                    }}
+                    placeholder="搜索相关素材..."
+                    className="flex-1 px-4 py-3 text-sm border border-gray-200 rounded-xl outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-50"
+                  />
+                  <button
+                    onClick={handleSearchMaterials}
+                    disabled={!searchQuery.trim() || isSearching}
+                    className="px-4 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2 text-sm"
+                  >
+                    {isSearching ? '...' : '🔍'}
+                  </button>
+                </div>
+              </div>
+
+              {/* 素材列表 */}
+              <div className="flex-1 overflow-y-auto min-h-0 rounded-xl">
+                <div className="flex justify-between items-center mb-4 sticky top-0 bg-white/95 backdrop-blur py-2 z-10 border-b border-gray-100">
+                  <h3 className="font-bold text-gray-700">研究素材</h3>
+                  <span className="text-xs text-gray-400">{researchSources.length} 条结果</span>
+                </div>
+
+                {researchSources.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-gray-400 text-sm">
+                    <p>暂无素材，尝试搜索一下？</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {researchSources.map((source) => (
+                      <div
+                        key={source.id}
+                        className="bg-gray-50 border border-gray-100 rounded-xl overflow-hidden hover:shadow-md transition-all group"
+                      >
+                        <div
+                          className="p-4 cursor-pointer"
+                          onClick={() => setExpandedSourceId(expandedSourceId === source.id ? null : source.id)}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <h4 className="text-sm font-bold text-gray-800 line-clamp-1 group-hover:text-indigo-600 transition-colors">{source.title}</h4>
+                              </div>
+                              <p className="text-gray-500 text-xs leading-relaxed line-clamp-2">{source.summary}</p>
+                            </div>
+                            <button className="text-gray-300 hover:text-indigo-600 text-xs">
+                              {expandedSourceId === source.id ? '▲' : '▼'}
+                            </button>
+                          </div>
+                        </div>
+                        {expandedSourceId === source.id && (
+                          <div className="px-4 pb-4 pt-0 border-t border-gray-100">
                             {source.url && (
-                              <a
-                                href={source.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className="text-xs text-indigo-500 hover:text-indigo-700 font-medium"
-                              >
-                                查看原文 →
+                              <a href={source.url} target="_blank" onClick={(e) => e.stopPropagation()} className="block mt-2 text-[10px] text-indigo-500 hover:underline mb-2">
+                                查看原文 ↗
                               </a>
                             )}
+                            <p className="text-xs text-gray-600 leading-relaxed whitespace-pre-wrap">{source.content}</p>
                           </div>
-                          <p className="text-gray-600 text-sm leading-relaxed mb-3">{source.summary}</p>
-                          <div className="flex items-center gap-4 text-xs text-gray-400">
-                            <span>相关度: {source.relevance}%</span>
-                            <span>•</span>
-                            <span>{new Date(source.timestamp).toLocaleString('zh-CN')}</span>
-                          </div>
-                        </div>
-                        <button className="text-gray-400 hover:text-indigo-600 transition-colors shrink-0">
-                          {expandedSourceId === source.id ? '▲' : '▼'}
-                        </button>
+                        )}
                       </div>
-                    </div>
-                    {expandedSourceId === source.id && (
-                      <div className="px-6 pb-6 pt-0 border-t border-gray-100 animate-in slide-in-from-top-2">
-                        <div className="pt-6">
-                          <h5 className="text-sm font-bold text-gray-500 uppercase tracking-widest mb-3">详细内容</h5>
-                          <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{source.content}</p>
-                        </div>
-                      </div>
-                    )}
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
             </div>
-          )}
-
-          <div className="flex justify-center pt-10">
-            <button
-              onClick={handleConfirmResearch}
-              disabled={isLoading}
-              className="px-12 py-4 bg-indigo-600 text-white rounded-full font-bold text-lg hover:bg-indigo-700 transition-all shadow-xl active:scale-95"
-            >
-              {isLoading ? '正在构思章节框架...' : '确认并生成大纲'}
-            </button>
           </div>
         </div>
       )}

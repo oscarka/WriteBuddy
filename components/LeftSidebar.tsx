@@ -125,6 +125,65 @@ export const LeftSidebar: React.FC<Props> = ({ project, onUpdate, onSelectChapte
 
     // ... (existing helper functions)
 
+    const [isAssetEditing, setIsAssetEditing] = useState(false);
+    const [editedContent, setEditedContent] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
+
+    useEffect(() => {
+        if (selectedAsset) {
+            setIsAssetEditing(false);
+            // If content is missing, try to fetch it
+            if (!selectedAsset.content && kbId) {
+                setEditedContent('Loading content...');
+                WeKnoraService.getAssetContent(project.id, kbId, selectedAsset.id).then(res => {
+                    if (res.success && res.content) {
+                        // Update local selectedAsset with fetched content so UI updates
+                        setSelectedAsset(prev => prev ? { ...prev, content: res.content } : null);
+                        setEditedContent(res.content);
+                    } else {
+                        setEditedContent('Failed to load content.');
+                    }
+                });
+            } else {
+                setEditedContent(selectedAsset.content || '');
+            }
+        }
+    }, [selectedAsset]);
+
+    const handleSaveAsset = async () => {
+        if (!selectedAsset || !kbId) return;
+
+        setIsSaving(true);
+        setStatusMessage('Syncing: Deleting old version...');
+
+        // 1. Delete the old asset to avoid duplicates
+        const deleteRes = await WeKnoraService.deleteAsset(project.id, selectedAsset.id);
+
+        // Even if delete fails (maybe it was creating a new one anyway), try upload
+        if (!deleteRes.success && deleteRes.error) {
+            console.warn("Delete failed, likely overwriting:", deleteRes.error);
+        }
+
+        setStatusMessage('Syncing: Uploading new version...');
+        const blob = new Blob([editedContent], { type: 'text/markdown' });
+        const file = new File([blob], selectedAsset.name || selectedAsset.title || 'untitled.md', { type: 'text/markdown' });
+
+        const result = await WeKnoraService.uploadAsset(project.id, kbId, file);
+
+        if (result.success) {
+            setStatusMessage('Asset successfully updated!');
+            setIsAssetEditing(false);
+
+            // Refresh assets list
+            await loadAssets(kbId);
+
+            // Hack: update selectedAsset.content locally so preview works instantly
+            setSelectedAsset(prev => prev ? { ...prev, content: editedContent } : null);
+        } else {
+            setStatusMessage(`Error saving: ${result.error}`);
+        }
+    };
+
     return (
         <aside className="w-64 border-r bg-gray-50 flex flex-col shrink-0 h-full relative">
             {/* Tab Header */}
@@ -251,11 +310,11 @@ export const LeftSidebar: React.FC<Props> = ({ project, onUpdate, onSelectChapte
 
             {/* Preview Modal (Wide & Premium) */}
             {selectedAsset && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-8 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-white w-full max-w-4xl h-[85vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden ring-1 ring-gray-900/5">
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-8 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setSelectedAsset(null)}>
+                    <div className="bg-white w-full max-w-7xl h-[95vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden ring-1 ring-gray-900/5 transition-all" onClick={e => e.stopPropagation()}>
 
                         {/* Header */}
-                        <div className="px-8 py-6 border-b flex items-center justify-between bg-white shrink-0">
+                        <div className="px-8 py-4 border-b flex items-center justify-between bg-white shrink-0">
                             <div className="flex items-center gap-4 min-w-0">
                                 <div className="w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center text-2xl text-indigo-600 shrink-0">
                                     📄
@@ -272,118 +331,146 @@ export const LeftSidebar: React.FC<Props> = ({ project, onUpdate, onSelectChapte
                                     </div>
                                 </div>
                             </div>
-                            <button
-                                onClick={() => setSelectedAsset(null)}
-                                className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
-                            >
-                                <span className="text-xl">✕</span>
-                            </button>
+                            <div className="flex items-center gap-3">
+                                {selectedAsset.content && !isAssetEditing && (
+                                    <button
+                                        onClick={() => setIsAssetEditing(true)}
+                                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 transition-colors shadow-sm"
+                                    >
+                                        ✎ Edit
+                                    </button>
+                                )}
+                                {isAssetEditing && (
+                                    <>
+                                        <button
+                                            onClick={() => setIsAssetEditing(false)}
+                                            className="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-xs font-bold hover:bg-gray-200 transition-colors"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            onClick={handleSaveAsset}
+                                            disabled={isSaving}
+                                            className={`px-4 py-2 ${isSaving ? 'bg-gray-400 cursor-wait' : 'bg-green-500 hover:bg-green-600'} text-white rounded-lg text-xs font-bold transition-colors shadow-sm flex items-center gap-2`}
+                                        >
+                                            {isSaving ? (
+                                                <>
+                                                    <span className="animate-spin">⏳</span> Saving...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <span>✓</span> Save & Sync
+                                                </>
+                                            )}
+                                        </button>
+                                    </>
+                                )}
+                                <button
+                                    onClick={() => setSelectedAsset(null)}
+                                    className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                                >
+                                    <span className="text-xl">✕</span>
+                                </button>
+                            </div>
                         </div>
 
                         {/* Main Content (Split View) */}
                         <div className="flex-1 overflow-hidden flex flex-col md:flex-row bg-[#FAFAFA]">
 
-                            {/* Left: Metadata & Status */}
-                            <div className="w-full md:w-80 border-r bg-white p-8 overflow-y-auto shrink-0 flex flex-col gap-8">
-                                <div>
-                                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Processing Status</h4>
-                                    <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-xl border border-gray-100">
-                                        <div className={`w-3 h-3 rounded-full ${selectedAsset.parse_status === 'success' || !selectedAsset.parse_status ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-yellow-500 animate-pulse'}`}></div>
-                                        <div className="flex flex-col">
-                                            <span className="text-sm font-bold text-gray-700 capitalize">{selectedAsset.parse_status || 'Ready'}</span>
-                                            <span className="text-[10px] text-gray-400 leading-tight">
-                                                {selectedAsset.parse_status === 'success' || !selectedAsset.parse_status
-                                                    ? 'Indexed & Ready for Context'
-                                                    : 'Evaluating content structure...'}
-                                            </span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">File Details</h4>
-                                    <div className="space-y-4">
-                                        <div className="flex justify-between items-center py-2 border-b border-dashed">
-                                            <span className="text-xs text-gray-500">File Size</span>
-                                            <span className="text-xs font-mono font-medium text-gray-700">-- KB</span>
-                                        </div>
-                                        <div className="flex justify-between items-center py-2 border-b border-dashed">
-                                            <span className="text-xs text-gray-500">Uploaded</span>
-                                            <span className="text-xs font-mono font-medium text-gray-700">Just now</span>
-                                        </div>
-                                        <div className="flex justify-between items-center py-2 border-b border-dashed">
-                                            <span className="text-xs text-gray-500">Tokens</span>
-                                            <span className="text-xs font-mono font-medium text-gray-700">~ Est. 1.2k</span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="pt-4 mt-auto">
-                                    <button disabled className="w-full py-3 bg-indigo-50 text-indigo-600 rounded-xl text-xs font-bold hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2">
-                                        <span>⬇</span> Download Original
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Right: AI Summary / Content */}
-                            <div className="flex-1 p-8 overflow-y-auto">
-                                <div className="max-w-2xl mx-auto space-y-8">
-
-                                    {/* AI Summary Section */}
-                                    <div className="space-y-4">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-xl">✨</span>
-                                            <h4 className="text-lg font-serif font-bold text-gray-800">AI Knowledge Summary</h4>
-                                        </div>
-                                        <div className="p-6 bg-white rounded-2xl border border-indigo-100 shadow-sm relative overflow-hidden group">
-                                            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-indigo-50 to-transparent rounded-bl-[100px] -z-0 opacity-50"></div>
-
-                                            {/* Simulated Summary Content */}
-                                            <div className="relative z-10 space-y-4">
-                                                {selectedAsset.summary ? (
-                                                    <p className="text-gray-600 leading-relaxed text-sm">
-                                                        {selectedAsset.summary}
-                                                    </p>
-                                                ) : (
-                                                    <div className="text-center py-8">
-                                                        <p className="text-gray-400 text-sm mb-4">No summary generated yet.</p>
-                                                        <button className="px-5 py-2 bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-full text-xs font-bold shadow-lg shadow-indigo-200 hover:shadow-indigo-300 hover:-translate-y-0.5 transition-all">
-                                                            Generate Summary & Analysis
-                                                        </button>
-                                                    </div>
-                                                )}
+                            {/* Left: Metadata & Status (Hidden in Edit Mode to maximize space) */}
+                            {!isAssetEditing && (
+                                <div className="w-full md:w-80 border-r bg-white p-8 overflow-y-auto shrink-0 flex flex-col gap-8">
+                                    <div>
+                                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Processing Status</h4>
+                                        <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-xl border border-gray-100">
+                                            <div className={`w-3 h-3 rounded-full ${selectedAsset.parse_status === 'success' || !selectedAsset.parse_status ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-yellow-500 animate-pulse'}`}></div>
+                                            <div className="flex flex-col">
+                                                <span className="text-sm font-bold text-gray-700 capitalize">{selectedAsset.parse_status || 'Ready'}</span>
+                                                <span className="text-[10px] text-gray-400 leading-tight">
+                                                    {selectedAsset.parse_status === 'success' || !selectedAsset.parse_status
+                                                        ? 'Indexed & Ready for Context'
+                                                        : 'Evaluating content structure...'}
+                                                </span>
                                             </div>
                                         </div>
                                     </div>
 
-                                    {/* Content Preview Placehoder / Excerpt */}
-                                    <div className="space-y-4 pt-4 border-t border-dashed">
-                                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
-                                            <span>Text Content Extraction</span>
-                                            <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-[10px]">Preview</span>
-                                        </h4>
-
-                                        <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm min-h-[300px] relative">
-                                            {selectedAsset.content ? (
-                                                <div className="prose prose-sm max-w-none text-gray-600">
-                                                    {selectedAsset.content}
-                                                </div>
-                                            ) : (
-                                                <div className="flex flex-col items-center justify-center h-full gap-4 opacity-40">
-                                                    <div className="w-16 h-16 rounded-2xl bg-gray-50 border-2 border-dashed border-gray-200 flex items-center justify-center text-3xl">
-                                                        🔒
-                                                    </div>
-                                                    <div className="text-center space-y-1">
-                                                        <p className="font-bold text-gray-900">Content Secured & Indexed</p>
-                                                        <p className="text-xs text-gray-500 max-w-xs mx-auto">
-                                                            This document has been successfully processed into vector embeddings.
-                                                            Raw text is not stored for display to optimize performance.
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            )}
+                                    <div>
+                                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">File Details</h4>
+                                        <div className="space-y-4">
+                                            <div className="flex justify-between items-center py-2 border-b border-dashed">
+                                                <span className="text-xs text-gray-500">File Size</span>
+                                                <span className="text-xs font-mono font-medium text-gray-700">-- KB</span>
+                                            </div>
+                                            <div className="flex justify-between items-center py-2 border-b border-dashed">
+                                                <span className="text-xs text-gray-500">Tokens</span>
+                                                <span className="text-xs font-mono font-medium text-gray-700">~ Est. 1.2k</span>
+                                            </div>
                                         </div>
                                     </div>
+
+                                    {/* AI Summary Section - Only in view mode */}
+                                    <div className="pt-8 border-t border-dashed">
+                                        <div className="flex items-center gap-2 mb-4">
+                                            <span className="text-xl">✨</span>
+                                            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest">AI Summary</h4>
+                                        </div>
+                                        {selectedAsset.summary ? (
+                                            <p className="text-gray-600 leading-relaxed text-xs bg-indigo-50/50 p-4 rounded-xl border border-indigo-50">
+                                                {selectedAsset.summary}
+                                            </p>
+                                        ) : (
+                                            <p className="text-gray-400 text-xs italic">No summary available.</p>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Right: Content Editor / Preview */}
+                            <div className="flex-1 p-8 overflow-y-auto">
+                                <div className="max-w-4xl mx-auto h-full flex flex-col">
+
+                                    {isAssetEditing ? (
+                                        <div className="flex-1 flex flex-col h-full animate-in fade-in duration-300">
+                                            <div className="mb-2 flex justify-between items-center">
+                                                <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">Editing Mode</span>
+                                                <span className="text-xs text-gray-400">Markdown supported</span>
+                                            </div>
+                                            <textarea
+                                                value={editedContent}
+                                                onChange={(e) => setEditedContent(e.target.value)}
+                                                className="flex-1 w-full p-8 border border-indigo-200 rounded-2xl focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none resize-none font-mono text-sm leading-relaxed text-gray-700 shadow-inner bg-white"
+                                                placeholder="Start writing..."
+                                            />
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-4">
+                                            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                                                <span>Text Content</span>
+                                                <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-[10px]">Preview</span>
+                                            </h4>
+
+                                            <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm min-h-[500px] relative">
+                                                {selectedAsset.content ? (
+                                                    <div className="prose prose-sm max-w-none text-gray-600 whitespace-pre-wrap">
+                                                        {selectedAsset.content}
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex flex-col items-center justify-center h-full gap-4 opacity-40 py-20">
+                                                        <div className="w-16 h-16 rounded-2xl bg-gray-50 border-2 border-dashed border-gray-200 flex items-center justify-center text-3xl">
+                                                            🔒
+                                                        </div>
+                                                        <div className="text-center space-y-1">
+                                                            <p className="font-bold text-gray-900">Content Secured & Indexed</p>
+                                                            <p className="text-xs text-gray-500 max-w-xs mx-auto">
+                                                                Raw text is not available for display or editing.
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
 
                                 </div>
                             </div>

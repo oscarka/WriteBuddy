@@ -26,7 +26,7 @@ export const Editor: React.FC<Props> = ({ project, onUpdate, onBack }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [showExportMenu, setShowExportMenu] = useState(false);
     const [activeSidebarTab, setActiveSidebarTab] = useState<'files' | 'search' | 'ai' | 'settings'>('files');
-    const [showAiPanel, setShowAiPanel] = useState(false); // Independent AI Panel State
+    const [showAiPanel, setShowAiPanel] = useState(true); // Independent AI Panel State - Default OPEN
     const [showDemo, setShowDemo] = useState(false);
     const [lastSelection, setLastSelection] = useState<{ text: string, range: Range } | null>(null);
 
@@ -330,7 +330,7 @@ export const Editor: React.FC<Props> = ({ project, onUpdate, onBack }) => {
     }, []);
 
     return (
-        <div className="min-h-screen flex flex-row bg-white overflow-hidden relative">
+        <div className="h-screen flex flex-row bg-white overflow-hidden relative">
             <style>{`
         ::highlight(ai-context) {
           background-color: #c7d2fe;
@@ -367,7 +367,7 @@ export const Editor: React.FC<Props> = ({ project, onUpdate, onBack }) => {
             )}
 
             {/* 3. Main Editor Area */}
-            <div className="flex-1 flex flex-col min-w-0 bg-white">
+            <div className="flex-1 flex flex-col min-w-0 bg-white h-screen">
                 {/* Top Navbar */}
                 <header className="h-16 border-b flex items-center justify-between px-6 bg-white shrink-0 z-20 relative">
                     <div className="flex items-center gap-4">
@@ -446,7 +446,7 @@ export const Editor: React.FC<Props> = ({ project, onUpdate, onBack }) => {
                             onBlur={() => setIsEditing(false)}
                             onMouseUp={handleSelectionChange}
                             onKeyUp={handleSelectionChange}
-                            className="w-full text-lg leading-loose outline-none text-gray-700 placeholder:text-gray-300 selection:bg-indigo-100 whitespace-pre-wrap break-words pb-4"
+                            className="w-full text-base leading-loose outline-none text-gray-700 placeholder:text-gray-300 selection:bg-indigo-100 whitespace-pre-wrap break-words pb-4"
                             style={{ minHeight: '200px', caretColor: '#4f46e5' }}
                             data-placeholder={diffPreview ? '' : 'Start writing...'}
                         />

@@ -207,7 +207,7 @@ export class AIService {
         context: context // Optional extra context passed to backend if needed (e.g. L2 outline)
       };
 
-      const response = await fetch(`${API_BASE_URL}/api/project/${projectId}/chat`, {
+      const response = await fetch(`${API_BASE_URL}/api/project/${projectId}/agent-chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
