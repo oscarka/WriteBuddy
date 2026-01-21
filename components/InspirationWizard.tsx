@@ -13,28 +13,29 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
   const [step, setStep] = useState<'input' | 'direction' | 'research' | 'outline' | 'custom'>(initialInput ? 'direction' : 'input');
   const [input, setInput] = useState(initialInput || '');
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingDirectionIdx, setLoadingDirectionIdx] = useState<number | null>(null); // 正在加载的方向卡片索引
   const [directions, setDirections] = useState<InspirationDirection[]>([]);
   const [selectedDirection, setSelectedDirection] = useState<InspirationDirection | null>(null);
   const [research, setResearch] = useState<ResearchData | null>(null);
   const [outline, setOutline] = useState<any[]>([]);
-  
+
   // 编辑状态
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editDesc, setEditDesc] = useState('');
-  
+
   // 研究数据编辑状态
   const [editingCharacterIdx, setEditingCharacterIdx] = useState<number | null>(null);
   const [editingTermIdx, setEditingTermIdx] = useState<number | null>(null);
   const [newCharacter, setNewCharacter] = useState('');
   const [newTerm, setNewTerm] = useState('');
-  
+
   // 研究素材搜索状态
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [researchSources, setResearchSources] = useState<ResearchSource[]>([]);
   const [expandedSourceId, setExpandedSourceId] = useState<string | null>(null);
-  
+
   // 大纲编辑状态
   const [editingOutlineIdx, setEditingOutlineIdx] = useState<number | null>(null);
   const [editingOutlineTitle, setEditingOutlineTitle] = useState('');
@@ -62,17 +63,25 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
     }
   };
 
-  const handleSelectDirection = async (dir: InspirationDirection) => {
+  const handleSelectDirection = async (dir: InspirationDirection, index: number) => {
     setSelectedDirection(dir);
+    setLoadingDirectionIdx(index); // 标记哪个卡片正在加载
     setIsLoading(true);
     try {
-      const resData = await AIService.researchDirection(dir.title + ": " + dir.description);
+      // 并行加载：设定内容和搜索素材同时获取
+      const [resData, searchResults] = await Promise.all([
+        AIService.researchDirection(dir.title + ": " + dir.description),
+        AIService.searchResearchMaterials(dir.title, dir.title)
+      ]);
+
       setResearch(resData);
+      setResearchSources(searchResults); // 直接设置搜索结果
       setStep('research');
     } catch (e) {
       console.error(e);
     } finally {
       setIsLoading(false);
+      setLoadingDirectionIdx(null); // 清除加载状态
     }
   };
 
@@ -147,7 +156,7 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
   const submitCustom = () => {
     if (!editTitle.trim()) return;
     setSelectedDirection({ title: editTitle, description: editDesc });
-    handleSelectDirection({ title: editTitle, description: editDesc });
+    handleSelectDirection({ title: editTitle, description: editDesc }, -1); // 自定义方向用 -1 作为索引
   };
 
   // 研究数据编辑函数
@@ -218,18 +227,12 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
     }
   };
 
-  // 自动搜索（当进入研究步骤时）
-  useEffect(() => {
-    if (step === 'research' && selectedDirection && researchSources.length === 0) {
-      // 自动进行一次初始搜索
-      handleSearchMaterials(selectedDirection.title);
-    }
-  }, [step, selectedDirection]);
+  // 注意：自动搜索已移除，现在在选择方向时并行加载设定和素材
 
   return (
     <div className="fixed inset-0 bg-white z-50 overflow-y-auto flex flex-col items-center">
       <div className="w-full max-w-6xl flex items-center justify-between p-8">
-        <button 
+        <button
           onClick={onCancel}
           className="text-gray-400 hover:text-black font-medium flex items-center gap-2 transition-colors"
         >
@@ -237,11 +240,10 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
         </button>
         <div className="flex gap-3">
           {['direction', 'research', 'outline'].map((s, idx) => (
-            <div 
-              key={s} 
-              className={`h-1.5 w-12 rounded-full transition-all duration-500 ${
-                ['direction', 'research', 'outline', 'custom'].indexOf(step) >= idx ? 'bg-indigo-600' : 'bg-gray-100'
-              }`} 
+            <div
+              key={s}
+              className={`h-1.5 w-12 rounded-full transition-all duration-500 ${['direction', 'research', 'outline', 'custom'].indexOf(step) >= idx ? 'bg-indigo-600' : 'bg-gray-100'
+                }`}
             />
           ))}
         </div>
@@ -260,23 +262,30 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
             <h2 className="text-5xl font-serif font-bold text-gray-800 tracking-tight">选择您的创作路径</h2>
             <p className="text-gray-400 text-lg">AI 为您的灵感规划了四条不同的创作维度：</p>
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             {directions.map((dir, i) => (
               <div
                 key={i}
-                onClick={() => editingIdx === null && handleSelectDirection(dir)}
-                className={`text-left p-10 border border-gray-100 rounded-[2.5rem] transition-all group relative overflow-hidden bg-white ${editingIdx === null ? 'hover:border-indigo-200 hover:shadow-2xl hover:shadow-indigo-50/50 cursor-pointer' : ''}`}
+                onClick={() => editingIdx === null && loadingDirectionIdx === null && handleSelectDirection(dir, i)}
+                className={`text-left p-10 border rounded-[2.5rem] transition-all group relative overflow-hidden bg-white ${loadingDirectionIdx === i
+                  ? 'border-indigo-500 shadow-2xl shadow-indigo-100 scale-[0.98]'
+                  : loadingDirectionIdx !== null
+                    ? 'opacity-50 cursor-not-allowed'
+                    : editingIdx === null
+                      ? 'border-gray-100 hover:border-indigo-200 hover:shadow-2xl hover:shadow-indigo-50/50 cursor-pointer'
+                      : 'border-gray-100'
+                  }`}
               >
                 {editingIdx === i ? (
                   <div className="space-y-4 animate-in fade-in duration-300">
-                    <input 
+                    <input
                       autoFocus
                       className="w-full text-2xl font-bold text-gray-800 border-b border-indigo-200 outline-none pb-2"
                       value={editTitle}
                       onChange={(e) => setEditTitle(e.target.value)}
                     />
-                    <textarea 
+                    <textarea
                       className="w-full h-32 text-gray-500 leading-relaxed outline-none resize-none bg-gray-50 p-4 rounded-2xl"
                       value={editDesc}
                       onChange={(e) => setEditDesc(e.target.value)}
@@ -288,7 +297,14 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
                   </div>
                 ) : (
                   <>
-                    <button 
+                    {/* 加载中覆盖层 */}
+                    {loadingDirectionIdx === i && (
+                      <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center z-10 rounded-[2.5rem]">
+                        <div className="w-12 h-12 border-4 border-indigo-100 border-t-indigo-600 rounded-full animate-spin mb-4" />
+                        <p className="text-indigo-600 font-bold">正在准备研究资料...</p>
+                      </div>
+                    )}
+                    <button
                       onClick={(e) => startEdit(i, e)}
                       className="absolute top-8 right-8 p-2 text-gray-300 hover:text-indigo-500 opacity-0 group-hover:opacity-100 transition-all"
                       title="修改文案"
@@ -329,14 +345,14 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
 
       {step === 'custom' && (
         <div className="max-w-3xl w-full px-8 space-y-12 animate-in slide-in-from-bottom-6 duration-500">
-           <div className="text-center space-y-4">
+          <div className="text-center space-y-4">
             <h2 className="text-4xl font-serif font-bold text-gray-800">自定义创作方向</h2>
             <p className="text-gray-400">输入您脑海中已经成型的故事蓝图：</p>
           </div>
           <div className="bg-white p-10 border border-gray-100 rounded-[2.5rem] shadow-xl shadow-gray-100/50 space-y-6">
             <div className="space-y-2">
               <label className="text-xs font-bold text-gray-400 uppercase tracking-widest ml-2">作品标题</label>
-              <input 
+              <input
                 autoFocus
                 placeholder="例如：遗忘之城的记忆碎片"
                 className="w-full text-3xl font-serif font-bold text-gray-800 border-b border-gray-100 focus:border-indigo-500 outline-none pb-4 transition-colors"
@@ -346,7 +362,7 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
             </div>
             <div className="space-y-2">
               <label className="text-xs font-bold text-gray-400 uppercase tracking-widest ml-2">核心简介</label>
-              <textarea 
+              <textarea
                 placeholder="在这里描述故事的起源、世界观或主要矛盾..."
                 className="w-full h-48 text-lg text-gray-600 leading-relaxed outline-none resize-none bg-gray-50 p-6 rounded-3xl border border-transparent focus:border-indigo-100 transition-all"
                 value={editDesc}
@@ -355,7 +371,7 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
             </div>
           </div>
           <div className="flex justify-center gap-4">
-             <button
+            <button
               onClick={() => setStep('direction')}
               className="px-10 py-4 text-gray-400 font-bold hover:text-gray-600 transition-all"
             >
@@ -378,7 +394,7 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
             <h2 className="text-4xl font-serif font-bold text-gray-800">研究摘要</h2>
             <p className="text-gray-500 mt-4 text-lg">已为您规划的路径 "{selectedDirection?.title}" 准备好背景资料（可编辑）：</p>
           </div>
-          
+
           {/* 研究素材搜索框 */}
           <div className="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm">
             <div className="flex gap-3">
@@ -416,7 +432,7 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
             {/* 核心背景 - 可编辑 */}
             <div className="bg-gray-50 p-10 rounded-[2.5rem] border border-gray-100 group flex flex-col">
               <h3 className="font-bold text-xl mb-6 flex items-center gap-3">
-                <span className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white text-xs">A</span> 
+                <span className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white text-xs">A</span>
                 核心背景
               </h3>
               <textarea
@@ -426,7 +442,7 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
                 placeholder="输入核心背景信息..."
               />
             </div>
-            
+
             <div className="space-y-8">
               {/* 角色原型 - 可编辑 */}
               <div>
@@ -451,7 +467,7 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
                         </div>
                       ) : (
                         <div className="flex items-center gap-2 group">
-                          <span 
+                          <span
                             onClick={() => setEditingCharacterIdx(i)}
                             className="px-5 py-2 bg-white border border-gray-200 rounded-full text-sm font-medium shadow-sm hover:border-indigo-400 transition-colors cursor-pointer"
                           >
@@ -490,7 +506,7 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
                   </button>
                 </div>
               </div>
-              
+
               {/* 关键术语与意象 - 可编辑 */}
               <div className="p-8 border border-dashed border-gray-200 rounded-3xl">
                 <h3 className="font-bold text-lg mb-4 text-gray-700 uppercase tracking-widest">关键术语与意象</h3>
@@ -553,7 +569,7 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
               </div>
             </div>
           </div>
-          
+
           {/* 研究素材列表 */}
           {researchSources.length > 0 && (
             <div className="space-y-6 mt-12">
@@ -612,7 +628,7 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
               </div>
             </div>
           )}
-          
+
           <div className="flex justify-center pt-10">
             <button
               onClick={handleConfirmResearch}
@@ -637,8 +653,8 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
                 {editingOutlineIdx === i ? (
                   <div className="space-y-4">
                     <div className="flex gap-6 items-start">
-                <div className="w-12 h-12 bg-white border border-gray-100 rounded-2xl flex items-center justify-center font-serif text-xl font-bold text-indigo-600 shrink-0">
-                  {i + 1}
+                      <div className="w-12 h-12 bg-white border border-gray-100 rounded-2xl flex items-center justify-center font-serif text-xl font-bold text-indigo-600 shrink-0">
+                        {i + 1}
                       </div>
                       <div className="flex-1 space-y-4">
                         <div>
@@ -650,8 +666,8 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
                             className="w-full text-xl font-bold text-gray-800 border-b-2 border-indigo-400 outline-none pb-2 focus:border-indigo-600 transition-colors"
                             placeholder="输入章节标题..."
                           />
-                </div>
-                <div>
+                        </div>
+                        <div>
                           <label className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 block">章节内容</label>
                           <textarea
                             value={editingOutlineDesc}
@@ -693,7 +709,7 @@ export const InspirationWizard: React.FC<Props> = ({ initialInput, onComplete, o
                     >
                       修改
                     </button>
-                </div>
+                  </div>
                 )}
               </div>
             ))}

@@ -4,9 +4,10 @@ import React from 'react';
 interface Props {
     activeTab: 'files' | 'search' | 'ai' | 'settings';
     onTabChange: (tab: 'files' | 'search' | 'ai' | 'settings') => void;
+    onLaunchDemo?: () => void;
 }
 
-export const ActivityBar: React.FC<Props> = ({ activeTab, onTabChange }) => {
+export const ActivityBar: React.FC<Props> = ({ activeTab, onTabChange, onLaunchDemo }) => {
     const icons = [
         { id: 'files', label: 'Files', icon: '📄' },
         { id: 'search', label: 'Search', icon: '🔍' },
@@ -40,6 +41,17 @@ export const ActivityBar: React.FC<Props> = ({ activeTab, onTabChange }) => {
             </div>
 
             <div className="mt-auto flex flex-col gap-4 w-full">
+                {/* Lab / Demo Button */}
+                {onLaunchDemo && (
+                    <button
+                        onClick={onLaunchDemo}
+                        className="w-full py-3 flex justify-center text-gray-500 hover:text-indigo-400 transition-all"
+                        title="Experimental Features (Demo)"
+                    >
+                        <span className="text-xl">🧪</span>
+                    </button>
+                )}
+
                 <button
                     onClick={() => onTabChange('settings')}
                     className={`w-full py-3 flex justify-center transition-all ${activeTab === 'settings' ? 'text-white' : 'text-gray-500 hover:text-gray-300'

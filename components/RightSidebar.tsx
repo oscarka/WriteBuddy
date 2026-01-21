@@ -1,42 +1,122 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Project, AIMode } from '../types';
 import { AIService } from '../services/geminiService';
+import { Sparkles, Check, CornerDownLeft, FileText, ChevronLeft, ChevronRight, X, BrainCircuit } from 'lucide-react';
 
 interface Props {
     project: Project;
+    selection: { text: string } | null;
+    onPreview: (draft: string | null, targetText?: string) => void;
+    onApply: (draft: string, targetText?: string) => void;
+    onClearSelection?: () => void;
 }
 
 interface Message {
     id: string;
     role: 'user' | 'assistant';
     content: string;
+    type?: 'chat' | 'draft';
+    targetText?: string;
 }
 
-export const RightSidebar: React.FC<Props> = ({ project }) => {
+const DraftCard: React.FC<{
+    content: string;
+    targetText?: string;
+    onPreview: (text: string | null, target?: string) => void;
+    onApply: (text: string, target?: string) => void;
+}> = ({ content, targetText, onPreview, onApply }) => {
+    return (
+        <div className="animate-in slide-in-from-bottom-4 fade-in duration-500 my-2">
+            <div className="flex items-center gap-2 mb-2 ml-1">
+                <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-sm">
+                    <Sparkles size={12} />
+                </div>
+                <span className="text-xs font-medium text-gray-500">Muse Copilot</span>
+            </div>
+
+            <div className="bg-white border border-indigo-100 rounded-xl shadow-sm overflow-hidden ring-1 ring-indigo-50 group hover:ring-indigo-200 transition-all">
+                <div className="bg-indigo-50/50 border-b border-indigo-50 px-3 py-2 flex items-center justify-between">
+                    <div className="flex items-center gap-1 text-xs font-medium text-indigo-700">
+                        <FileText size={12} />
+                        Draft Suggestion
+                    </div>
+                </div>
+
+                <div className="p-4 bg-white">
+                    <p className="text-gray-800 text-sm leading-relaxed font-serif whitespace-pre-wrap">
+                        {content}
+                    </p>
+                </div>
+
+                <div className="px-3 py-2 bg-gray-50 border-t border-gray-100 flex gap-2">
+                    <button
+                        className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium py-1.5 rounded-md flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95"
+                        onMouseEnter={() => onPreview(content, targetText)}
+                        onMouseLeave={() => onPreview(null)}
+                        onClick={() => onApply(content, targetText)}
+                    >
+                        <Check size={14} />
+                        Replace Selection
+                    </button>
+                    <button className="px-2 py-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-200/50 rounded-md transition-colors" title="Insert at Cursor">
+                        <CornerDownLeft size={14} />
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export const RightSidebar: React.FC<Props> = ({ project, selection, onPreview, onApply, onClearSelection }) => {
     const [input, setInput] = useState('');
     const [messages, setMessages] = useState<Message[]>([
-        { id: 'welcome', role: 'assistant', content: `Hi! I'm your creative copilot. I have context from your project "${project.title}". How can I help?` }
+        { id: 'welcome', role: 'assistant', content: `Hi! I'm your creative copilot. ${project.kbId ? '📚 Knowledge Base connected.' : ''} How can I help?` }
     ]);
     const [isLoading, setIsLoading] = useState(false);
+    const [loadingStatus, setLoadingStatus] = useState('');
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    };
+
+    useEffect(() => {
+        scrollToBottom();
+    }, [messages, isLoading]);
 
     const sendMessage = async () => {
         if (!input.trim() || isLoading) return;
 
+        const isContextual = !!selection;
+        const currentSelectionText = selection?.text;
+
         const userMsg: Message = { id: Date.now().toString(), role: 'user', content: input };
-        const newMessages = [...messages, userMsg];
-        setMessages(newMessages); // Optimistic update
+
+        // Optimistic update
+        setMessages(prev => [...prev, userMsg]);
         setInput('');
         setIsLoading(true);
 
-        try {
-            // Prepare messages for API (stripped of IDs)
-            const apiMessages = newMessages.map(m => ({
-                role: m.role,
-                content: m.content
-            }));
+        // Dynamic Status
+        if (project.kbId) {
+            setLoadingStatus('Searching Knowledge Base...');
+        } else {
+            setLoadingStatus('Thinking...');
+        }
 
-            // Call Real Backend RAG Chat
+        try {
+            // Construct API messages
+            const history = messages.map(m => ({ role: m.role, content: m.content }));
+
+            // If contextual, modify the last prompt to include context
+            let prompt = input;
+            if (isContextual && currentSelectionText) {
+                prompt = `[Context: "${currentSelectionText}"]\nUser Instruction: ${input}\n\nPlease generate a revised version or continuation based on the context and instruction. Direct output only.`;
+            }
+
+            const apiMessages = [...history, { role: 'user', content: prompt }];
+
+            // Call API
             const responseText = await AIService.chatWithProject(
                 project.id,
                 project.kbId,
@@ -46,23 +126,26 @@ export const RightSidebar: React.FC<Props> = ({ project }) => {
             const aiMsg: Message = {
                 id: (Date.now() + 1).toString(),
                 role: 'assistant',
-                content: responseText
+                content: responseText,
+                type: isContextual ? 'draft' : 'chat',
+                targetText: isContextual ? currentSelectionText : undefined
             };
 
             setMessages(prev => [...prev, aiMsg]);
 
         } catch (error) {
             console.error('Chat error:', error);
-            setMessages(prev => [...prev, { id: 'err', role: 'assistant', content: 'Sorry, I encountered an error accessing the knowledge base.' }]);
+            setMessages(prev => [...prev, { id: 'err', role: 'assistant', content: 'Sorry, I encountered an error.' }]);
         } finally {
             setIsLoading(false);
+            setLoadingStatus('');
         }
     };
 
     return (
-        <aside className="w-80 border-l bg-white flex flex-col shrink-0 h-full shadow-xl shadow-gray-100 z-10">
+        <aside className="w-80 border-l bg-white flex flex-col shrink-0 h-full shadow-xl shadow-gray-100 z-10 relative">
             {/* Header */}
-            <div className="h-14 border-b flex items-center px-6 justify-between bg-white">
+            <div className="h-14 border-b flex items-center px-6 justify-between bg-white shrink-0">
                 <span className="font-serif font-bold text-gray-800 flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
                     Copilot
@@ -73,31 +156,65 @@ export const RightSidebar: React.FC<Props> = ({ project }) => {
             {/* Chat Area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/30">
                 {messages.map(msg => (
-                    <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div
-                            className={`max-w-[85%] rounded-2xl p-3.5 text-sm leading-relaxed ${msg.role === 'user'
-                                ? 'bg-indigo-600 text-white rounded-br-none shadow-md shadow-indigo-100'
-                                : 'bg-white border border-gray-100 text-gray-700 rounded-bl-none shadow-sm'
-                                }`}
-                        >
-                            {msg.content}
+                    msg.type === 'draft' ? (
+                        <DraftCard
+                            key={msg.id}
+                            content={msg.content}
+                            targetText={msg.targetText}
+                            onPreview={onPreview}
+                            onApply={onApply}
+                        />
+                    ) : (
+                        <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                            <div
+                                className={`max-w-[85%] rounded-2xl p-3.5 text-sm leading-relaxed whitespace-pre-wrap ${msg.role === 'user'
+                                    ? 'bg-indigo-600 text-white rounded-br-none shadow-md shadow-indigo-100'
+                                    : 'bg-white border border-gray-100 text-gray-700 rounded-bl-none shadow-sm'
+                                    }`}
+                            >
+                                {msg.content}
+                            </div>
                         </div>
-                    </div>
+                    )
                 ))}
+
                 {isLoading && (
-                    <div className="flex justify-start">
-                        <div className="bg-white border border-gray-100 rounded-2xl rounded-bl-none p-4 shadow-sm flex gap-1">
-                            <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" />
-                            <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-75" />
-                            <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-150" />
+                    <div className="flex flex-col gap-2 animate-in fade-in duration-300">
+                        <div className="flex justify-start">
+                            <div className="bg-white border border-gray-100 rounded-2xl rounded-bl-none p-4 shadow-sm flex gap-1">
+                                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" />
+                                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-75" />
+                                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-150" />
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-[10px] font-medium text-indigo-500 px-2">
+                            <BrainCircuit size={12} className="animate-pulse" />
+                            {loadingStatus}
                         </div>
                     </div>
                 )}
+                <div ref={messagesEndRef} />
             </div>
 
-            {/* Input Area */}
-            <div className="p-4 bg-white border-t">
-                <div className="relative">
+            {/* Input Area Group */}
+            <div className="bg-white border-t z-20">
+                {/* Context Badge - Rendered as a block element relative to flow */}
+                {selection && (
+                    <div className="px-4 pt-3 pb-1 animate-in slide-in-from-bottom-2 fade-in">
+                        <div className="bg-indigo-600 text-white text-[10px] px-3 py-1.5 rounded-full shadow-md flex items-center gap-1.5 w-fit">
+                            <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
+                            Targeting: "{(selection.text.length > 25 ? selection.text.slice(0, 25) + '...' : selection.text)}"
+                            <button
+                                onClick={() => onClearSelection ? onClearSelection() : onApply('')}
+                                className="ml-1 hover:text-indigo-200 p-0.5 rounded-full hover:bg-white/10 transition-colors"
+                            >
+                                <X size={10} />
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                <div className="p-4 pt-2 relative">
                     <textarea
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
@@ -107,20 +224,17 @@ export const RightSidebar: React.FC<Props> = ({ project }) => {
                                 sendMessage();
                             }
                         }}
-                        placeholder="Ask AI about your assets..."
+                        placeholder={selection ? "Ask AI to edit this..." : "Ask AI about your assets..."}
                         className="w-full resize-none rounded-xl border border-gray-200 p-3 pr-10 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-50 outline-none max-h-32 min-h-[44px]"
                         rows={1}
                     />
                     <button
                         onClick={sendMessage}
                         disabled={!input.trim() || isLoading}
-                        className="absolute right-2 bottom-2 p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg disabled:opacity-30 transition-colors"
+                        className="absolute right-6 bottom-4 p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg disabled:opacity-30 transition-colors"
                     >
-                        ➤
+                        {isLoading ? <span className="animate-spin">↻</span> : '➤'}
                     </button>
-                </div>
-                <div className="text-[10px] text-center text-gray-300 mt-2">
-                    Connected to WeKnora Knowledge Base
                 </div>
             </div>
         </aside>

@@ -71,7 +71,7 @@ export class AIService {
 
   static async researchDirection(direction: string) {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3-flash-preview',
       contents: `针对创作方向："${direction}"进行研究并提供结构化数据。重点关注背景知识、角色原型、现实案例和专业术语。请使用中文回答。`,
       config: {
         responseMimeType: "application/json",
@@ -92,7 +92,7 @@ export class AIService {
 
   static async searchResearchMaterials(query: string, direction: string) {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3-flash-preview',
       contents: `作为一位专业的研究助手，请为创作方向"${direction}"搜索和整理相关的研究素材、参考资料、案例和背景知识。
 
 搜索关键词："${query}"

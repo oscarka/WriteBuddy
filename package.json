@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "api": "node api/server.js",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -15,6 +16,7 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "form-data": "^4.0.5",
+    "lucide-react": "^0.562.0",
     "multer": "^2.0.2",
     "node-fetch": "^3.3.2",
     "react": "^19.2.3",

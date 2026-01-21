@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import { GoogleGenAI, Type } from '@google/genai';
 import { Storage } from '@google-cloud/storage';
@@ -277,20 +278,53 @@ if (WEKNORA_BASE_URL) {
       console.log(`Uploading file: ${originalName} (Original: ${file.originalname})`);
 
       const formData = new FormData();
-      // Explicitly providing filename and avoiding implicit conversion issues
-      // Using encodeURIComponent to ensure safe ASCII transfer to WeKnora
       formData.append('file', file.buffer, {
         filename: originalName,
         contentType: file.mimetype || 'application/octet-stream',
       });
 
-      // WeKnora endpoint for file upload: POST /api/v1/knowledgebases/:id/knowledge/file
+      // WeKnora endpoint for file upload: POST /api/v1/knowledge-bases/:id/knowledge/file
       const result = await callWeKnora(
         `/api/v1/knowledge-bases/${kbId}/knowledge/file`,
         'POST',
         formData,
         true
       );
+
+      console.log('Upload result:', JSON.stringify(result, null, 2));
+
+      // CRITICAL: Trigger parsing after upload
+      // WeKnora requires explicit parse call to start embedding
+      if (result && result.data && result.data.id) {
+        const knowledgeId = result.data.id;
+        console.log(`[Parse] Triggering parse for knowledge ${knowledgeId}...`);
+
+        try {
+          // Try different parse endpoints based on WeKnora API version
+          // Option 1: POST /api/v1/knowledge/:id/parse
+          const parseResult = await callWeKnora(
+            `/api/v1/knowledge/${knowledgeId}/parse`,
+            'POST',
+            {}
+          );
+          console.log('[Parse] Parse triggered successfully:', parseResult);
+        } catch (parseError) {
+          console.warn('[Parse] Direct parse failed, trying enable endpoint:', parseError.message);
+
+          try {
+            // Option 2: PUT /api/v1/knowledge/:id with enable_status
+            const enableResult = await callWeKnora(
+              `/api/v1/knowledge/${knowledgeId}`,
+              'PUT',
+              { enable_status: 'enabled' }
+            );
+            console.log('[Parse] Enable triggered:', enableResult);
+          } catch (enableError) {
+            console.error('[Parse] Enable also failed:', enableError.message);
+            // Continue anyway - file is uploaded, parse might be triggered later
+          }
+        }
+      }
 
       res.json(result);
     } catch (error) {

@@ -1,9 +1,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Project, ViewState, Chapter, AIMode, AIStyle } from './types';
+import { Project, ViewState, Chapter, AIMode, AIStyle, ResearchData } from './types';
 import { InspirationWizard } from './components/InspirationWizard';
 import { Editor } from './components/Editor';
 import { saveProjectsToCloud, loadProjectsFromCloud } from './services/storageService';
+import { WeKnoraService } from './services/weknoraService';
+import { generateBibleContent, createBibleFile } from './utils/bibleGenerator';
 
 const MOCK_PROJECTS: Project[] = [
   {
@@ -188,9 +190,40 @@ const App: React.FC = () => {
     setView('inspiration-wizard');
   };
 
-  const createProjectFromInspiration = (data: any) => {
-    const newId = Date.now().toString();
+  const createProjectFromInspiration = async (data: {
+    title: string;
+    description: string;
+    outline: Array<{ title: string; description: string }>;
+    research: ResearchData;
+  }) => {
+    const newId = `project-${Date.now()}`;
     const firstChapterId = 'ch1';
+
+    // 1. Generate World Bible content
+    console.log('[Bible] Generating world_bible.md...');
+    const bibleContent = generateBibleContent(data);
+    const bibleFile = createBibleFile(bibleContent);
+
+    // 2. Create Knowledge Base for this project
+    let kbId: string | undefined;
+    try {
+      console.log('[Bible] Creating Knowledge Base...');
+      const kbResult = await WeKnoraService.createKnowledgeBase(newId, data.title);
+      if (kbResult?.data?.id) {
+        kbId = kbResult.data.id;
+        console.log('[Bible] KB created:', kbId);
+
+        // 3. Upload Bible to KB
+        console.log('[Bible] Uploading world_bible.md to KB...');
+        const uploadResult = await WeKnoraService.uploadAsset(newId, kbId, bibleFile);
+        console.log('[Bible] Upload result:', uploadResult);
+      }
+    } catch (err) {
+      console.error('[Bible] KB/Upload error:', err);
+      // Continue even if KB creation fails - project can work without KB
+    }
+
+    // 4. Create the project
     const newProject: Project = {
       id: newId,
       title: data.title,
@@ -198,15 +231,17 @@ const App: React.FC = () => {
       description: data.description,
       wordCount: 0,
       lastEdited: Date.now(),
-      chapters: data.outline.map((ch: any, i: number) => ({
+      chapters: data.outline.map((ch, i) => ({
         id: i === 0 ? firstChapterId : `ch${i + 1}`,
         title: ch.title,
         content: `【创作背景】: ${ch.description}\n\n---\n\n在这里开始你的创作...`
       })),
       currentChapterId: firstChapterId,
       aiMode: AIMode.DEFAULT,
-      style: AIStyle.CREATIVE
+      style: AIStyle.CREATIVE,
+      kbId: kbId, // Associate KB with project
     };
+
     setProjects([newProject, ...projects]);
     setActiveProjectId(newId);
     setView('editor');

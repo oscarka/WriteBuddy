@@ -1,0 +1,6 @@
+event:message
+data:{"id":"76217d38-380d-428f-a447-c745fd1d68d7","response_type":"agent_query","content":"","done":true,"session_id":"aec23910-ddde-498f-807b-5303c3d40c9e","assistant_message_id":"6fea8249-ac06-4d42-8696-c5e6dbefffaa","data":{"assistant_message_id":"6fea8249-ac06-4d42-8696-c5e6dbefffaa","session_id":"aec23910-ddde-498f-807b-5303c3d40c9e"}}
+
+event:message
+data:{"id":"76217d38-380d-428f-a447-c745fd1d68d7","response_type":"error","content":"custom agent configuration is required for agent QA","done":true,"data":{"error":"custom agent configuration is required for agent QA","stage":"agent_execution"}}
+
